@@ -1,25 +1,22 @@
 {
-  "name": "neo",
-  "productName": "NEO",
-  "version": "0.7.10",
-  "description": "A word processor for authors. Distraction-free by default.",
-  "homepage": "https://github.com/hughhowey/neo",
+  "name": "scriptwriter",
+  "productName": "ScriptWriter",
+  "version": "0.1.8",
+  "description": "A focused desktop editor for screenplays.",
+  "homepage": "",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "package": "electron-builder --mac",
-    "package:win": "electron-builder --win",
+    "test": "node tests/run.cjs",
+    "package": "electron-builder --win",
+    "package:win": "node package-windows.cjs",
     "package:linux": "electron-builder --linux",
     "package:all": "electron-builder --mac --win --linux"
   },
   "build": {
-    "appId": "com.hughhowey.neo",
-    "productName": "NEO",
-    "publish": {
-      "provider": "github",
-      "owner": "hughhowey",
-      "repo": "neo"
-    },
+    "appId": "com.scriptwriter.desktop",
+    "productName": "ScriptWriter",
+    "icon": "build/scriptwriter-icon.png",
     "mac": {
       "category": "public.app-category.productivity",
       "target": [
@@ -85,23 +82,31 @@
       "deleteAppDataOnUninstall": false
     },
     "files": [
-      "**/*",
-      "!pocket/**",
-      "!dist/**",
-      "!Backups/**",
-      "!*.md",
-      "!.github/**"
+      "main.js",
+      "recovery-state.cjs",
+      "preload.js",
+      "index.html",
+      "app.js",
+      "screenplay.js",
+      "screenplay-layout.js",
+      "styles.css",
+      "screenplay.css",
+      "covers.js",
+      "art.js",
+      "fonts/**",
+      "build/**"
     ]
   },
-  "author": "Hugh Howey",
+  "author": "ScriptWriter",
   "license": "MIT",
   "devDependencies": {
     "electron": "^43.0.0",
-    "electron-builder": "^26.15.3"
+    "electron-builder": "^26.15.3",
+    "playwright": "^1.63.0"
   },
   "dependencies": {
+    "dictionary-en-gb": "^3.0.0",
     "dictionary-en-us": "^2.2.1",
-    "electron-updater": "^6.3.9",
     "jszip": "^3.10.1",
     "nspell": "^2.1.5"
   },

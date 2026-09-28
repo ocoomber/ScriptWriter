@@ -1,4 +1,4 @@
-// NEO — main process
+// ScriptWriter — main process
 // Owns the window and all file-system access. The renderer talks to this
 // through the IPC handlers below (see preload.js for the exposed API).
 
@@ -6,9 +6,18 @@ const { app, BrowserWindow, ipcMain, dialog, Menu, MenuItem } = require('electro
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const crypto = require('crypto');
+const { inspectRecoveryState } = require('./recovery-state.cjs');
 
 // macOS Chromium's "smart delete" also removes whitespace around a deleted
 // selection, and that pass can duplicate characters. Deletes stay literal.
+app.setName('ScriptWriter');
+const isolatedLibrary = process.env.SCRIPTWRITER_LIBRARY;
+const userDataPath = isolatedLibrary
+  ? isolatedLibrary + '-user-data'
+  : path.join(app.getPath('appData'), 'ScriptWriter');
+fs.mkdirSync(userDataPath, { recursive: true });
+app.setPath('userData', userDataPath);
 app.commandLine.appendSwitch('blink-settings', 'smartInsertDeleteEnabled=false');
 
 // ---------------------------------------------------------------------------
@@ -16,21 +25,46 @@ app.commandLine.appendSwitch('blink-settings', 'smartInsertDeleteEnabled=false')
 // ---------------------------------------------------------------------------
 // Resolved properly at startup via app.getPath('documents') — this default
 // covers any early access and non-redirected setups.
-let LIBRARY_DIR = path.join(os.homedir(), 'Documents', 'NEO Library');
+let LIBRARY_DIR = process.env.SCRIPTWRITER_LIBRARY || path.join(os.homedir(), 'Documents', 'ScriptWriter Library');
 let LIBRARY_FILE = path.join(LIBRARY_DIR, 'library.json');
+
+function newLibrary() {
+  return {
+    authorName: '',
+    penNames: [],
+    firstRunDone: true,
+    hintShown: true,
+    pageTheme: 'night',
+    shelves: [{ id: 'shelf-1', name: 'Works in Progress', bookIds: [] }]
+  };
+}
+
+function corruptLibraryName() {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  return LIBRARY_FILE + '.corrupt-' + stamp;
+}
 
 function ensureLibrary() {
   if (!fs.existsSync(LIBRARY_DIR)) fs.mkdirSync(LIBRARY_DIR, { recursive: true });
   if (!fs.existsSync(LIBRARY_FILE)) {
-    const seed = {
-      authorName: '',
-      penNames: [],
-      firstRunDone: false,
-      pageTheme: 'night',
-      shelves: [{ id: 'shelf-1', name: 'Works in Progress', bookIds: [] }]
-    };
-    fs.writeFileSync(LIBRARY_FILE, JSON.stringify(seed, null, 2));
+    const seed = newLibrary();
+    atomicWrite(LIBRARY_FILE, JSON.stringify(seed, null, 2), 'utf8');
+    return seed;
   }
+
+  let library;
+  try { library = JSON.parse(fs.readFileSync(LIBRARY_FILE, 'utf8')); }
+  catch { library = null; }
+  if (library && typeof library === 'object' && !Array.isArray(library) && Array.isArray(library.shelves)) return library;
+
+  // Keep the original bytes intact for manual recovery before making a fresh,
+  // usable library. Never overwrite an unreadable library in place.
+  const backup = corruptLibraryName();
+  fs.renameSync(LIBRARY_FILE, backup);
+  const seed = newLibrary();
+  atomicWrite(LIBRARY_FILE, JSON.stringify(seed, null, 2), 'utf8');
+  logError('library', new Error(`Invalid library.json saved as ${path.basename(backup)} and replaced with a new library.`));
+  return seed;
 }
 
 function bookDir(bookId) {
@@ -56,10 +90,10 @@ function writeCatalog() {
       } catch { /* not a valid book folder */ }
     }
     lines.sort((a, b) => a.localeCompare(b));
-    fs.writeFileSync(path.join(LIBRARY_DIR, '_catalog.txt'),
-      'NEO LIBRARY CATALOG — which folder is which book\n' +
+    atomicWrite(path.join(LIBRARY_DIR, '_catalog.txt'),
+      'SCRIPTWRITER LIBRARY CATALOG — which folder is which screenplay\n' +
       '(regenerated automatically; edits here do nothing)\n\n' +
-      lines.join('\n') + '\n');
+      lines.join('\n') + '\n', 'utf8');
   } catch (err) {
     logError('catalog', err);
   }
@@ -74,9 +108,21 @@ function readJSON(file, fallback) {
 }
 
 function writeJSON(file, data) {
-  const tmp = file + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
-  fs.renameSync(tmp, file); // atomic-ish: never leave a half-written file
+  atomicWrite(file, JSON.stringify(data, null, 2), 'utf8');
+}
+
+function atomicWrite(file, data, encoding) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = file + '.' + process.pid + '.' + Math.random().toString(36).slice(2) + '.tmp';
+  try {
+    const fd = fs.openSync(tmp, 'w');
+    try { fs.writeFileSync(fd, data, encoding ? { encoding } : undefined); fs.fsyncSync(fd); }
+    finally { fs.closeSync(fd); }
+    fs.renameSync(tmp, file);
+  } catch (err) {
+    try { fs.unlinkSync(tmp); } catch { /* cleanup only */ }
+    throw err;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -84,14 +130,24 @@ function writeJSON(file, data) {
 // ---------------------------------------------------------------------------
 
 ipcMain.handle('library:read', () => {
-  ensureLibrary();
-  return readJSON(LIBRARY_FILE, null);
+  const library = ensureLibrary();
+  if (library && (!library.firstRunDone || !library.hintShown)) {
+    library.firstRunDone = true;
+    library.hintShown = true;
+    writeJSON(LIBRARY_FILE, library);
+  }
+  return library;
 });
+ipcMain.handle('library:openFolder', () => require('electron').shell.openPath(LIBRARY_DIR));
 
 ipcMain.handle('library:write', (_e, data) => {
+  if (!data || typeof data !== 'object' || Array.isArray(data) || !Array.isArray(data.shelves)) {
+    throw new Error('Invalid library data');
+  }
   ensureLibrary();
   writeJSON(LIBRARY_FILE, data);
   writeCatalog();
+  scheduleBackups();
   return true;
 });
 
@@ -119,26 +175,28 @@ ipcMain.handle('book:create', (_e, meta) => {
     tabNames: { notes: 'Notes', outline: 'Outline' }
   };
   writeJSON(path.join(dir, 'book.json'), book);
-  fs.writeFileSync(path.join(dir, 'notes.html'), '');
-  fs.writeFileSync(path.join(dir, 'outline.html'), '');
+  atomicWrite(path.join(dir, 'notes.html'), '', 'utf8');
+  atomicWrite(path.join(dir, 'outline.html'), '', 'utf8');
   writeJSON(path.join(dir, 'darlings.json'), []);
   writeJSON(path.join(dir, 'stickies.json'), []);
+  scheduleBackups();
   return book;
 });
 
 ipcMain.handle('book:readMeta', (_e, bookId) => {
-  return readJSON(path.join(bookDir(bookId), 'book.json'), null);
+  return readJSON(path.join(safeBookDir(bookId), 'book.json'), null);
 });
 
 ipcMain.handle('book:writeMeta', (_e, bookId, meta) => {
   meta.modified = new Date().toISOString();
-  writeJSON(path.join(bookDir(bookId), 'book.json'), meta);
+  writeJSON(path.join(safeBookDir(bookId), 'book.json'), meta);
   writeCatalog();
+  scheduleBackups();
   return true;
 });
 
 ipcMain.handle('chapter:read', (_e, bookId, chapterId) => {
-  const file = path.join(bookDir(bookId), 'chapters', chapterId + '.html');
+  const file = path.join(safeBookDir(bookId), 'chapters', safeChapterId(chapterId) + '.html');
   try {
     return fs.readFileSync(file, 'utf8');
   } catch {
@@ -147,21 +205,121 @@ ipcMain.handle('chapter:read', (_e, bookId, chapterId) => {
 });
 
 ipcMain.handle('chapter:write', (_e, bookId, chapterId, html) => {
-  const dir = path.join(bookDir(bookId), 'chapters');
+  const dir = path.join(safeBookDir(bookId), 'chapters');
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, chapterId + '.html'), html);
+  atomicWrite(path.join(dir, safeChapterId(chapterId) + '.html'), html, 'utf8');
+  scheduleBackups();
   return true;
 });
 
 ipcMain.handle('chapter:delete', (_e, bookId, chapterId) => {
-  const file = path.join(bookDir(bookId), 'chapters', chapterId + '.html');
+  const file = path.join(safeBookDir(bookId), 'chapters', safeChapterId(chapterId) + '.html');
   if (fs.existsSync(file)) fs.unlinkSync(file);
   return true;
 });
 
+// A renderer journal can be newer than the debounced manuscript files after
+// a crash. Recovery always creates a separate project, never replaces one.
+function inspectRecovery(bookId) {
+  const dir = safeBookDir(bookId);
+  const draft = readJSON(path.join(dir, 'recovery.json'), null);
+  const meta = readJSON(path.join(dir, 'book.json'), null);
+  const chapters = {};
+  if (Array.isArray(draft?.book?.chapterOrder)) {
+    for (const id of draft.book.chapterOrder) {
+      if (typeof id !== 'string' || !/^[a-z0-9-]+$/i.test(id)) return null;
+      try { chapters[id] = fs.readFileSync(path.join(dir, 'chapters', id + '.html'), 'utf8'); }
+      catch { /* a missing saved scene is a real recovery difference */ }
+    }
+  }
+  return inspectRecoveryState({
+    book: meta, chapters,
+    darlings: readJSON(path.join(dir, 'darlings.json'), []),
+    stickies: readJSON(path.join(dir, 'stickies.json'), []),
+    outline: readJSON(path.join(dir, 'screenplay-outline.json'), [])
+  }, draft);
+}
+ipcMain.handle('recovery:inspect', (_e, bookId) => inspectRecovery(bookId));
+ipcMain.handle('recovery:preserve', (_e, bookId) => {
+  if (!inspectRecovery(bookId)) return false;
+  const dir = safeBookDir(bookId);
+  const source = fs.readFileSync(path.join(dir, 'recovery.json'));
+  const archiveDir = path.join(dir, 'Recovery Drafts');
+  const digest = crypto.createHash('sha256').update(source).digest('hex').slice(0, 20);
+  const archive = path.join(archiveDir, `recovery-${digest}.json`);
+  if (fs.existsSync(archive)) return false;
+  atomicWrite(archive, source);
+  return true;
+});
+ipcMain.handle('recovery:copy', (_e, bookId) => {
+  const sourceDir = safeBookDir(bookId);
+  const archiveDir = path.join(sourceDir, 'Recovery Drafts');
+  const archives = fs.existsSync(archiveDir) ? fs.readdirSync(archiveDir)
+    .filter(name => /^recovery-[a-f0-9]{20}\.json$/.test(name))
+    .map(name => ({ name, modified: fs.statSync(path.join(archiveDir, name)).mtimeMs }))
+    .sort((a, b) => b.modified - a.modified) : [];
+  const draft = archives.length
+    ? readJSON(path.join(archiveDir, archives[0].name), null)
+    : inspectRecovery(bookId) ? readJSON(path.join(sourceDir, 'recovery.json'), null) : null;
+  if (!draft) return null;
+  if (!draft?.book || !Array.isArray(draft.book.chapterOrder) || !draft.chapters || typeof draft.chapters !== 'object') {
+    throw new Error('No recoverable draft');
+  }
+  const scenes = draft.book.chapterOrder;
+  if (scenes.some((scene) => typeof scene !== 'string' || !/^[a-z0-9-]+$/i.test(scene))) {
+    throw new Error('Invalid scene ID in recovery draft');
+  }
+  for (const scene of scenes) {
+    if (draft.chapters[scene] !== undefined && typeof draft.chapters[scene] !== 'string') {
+      throw new Error('Invalid scene content in recovery draft');
+    }
+  }
+
+  const id = 'book-recovered-' + Date.now().toString(36) + '-' + crypto.randomBytes(3).toString('hex');
+  const dir = safeBookDir(id);
+  const meta = { ...draft.book, id, title: (draft.book.title || 'Untitled') + ' (Recovered Copy)', savedRevision: draft.revision };
+  try {
+    fs.mkdirSync(path.join(dir, 'chapters'), { recursive: true });
+    for (const scene of scenes) atomicWrite(path.join(dir, 'chapters', scene + '.html'), draft.chapters[scene] || '', 'utf8');
+    writeJSON(path.join(dir, 'book.json'), meta);
+    writeJSON(path.join(dir, 'darlings.json'), draft.darlings || []);
+    writeJSON(path.join(dir, 'stickies.json'), draft.stickies || []);
+    writeJSON(path.join(dir, 'screenplay-outline.json'), draft.outline || []);
+    return meta;
+  } catch (err) {
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* preserve the original recovery error */ }
+    throw err;
+  }
+});
+
+function safeBookDir(bookId) {
+  if (typeof bookId !== 'string' || !/^book-[a-z0-9-]+$/i.test(bookId)) throw new Error('Invalid screenplay ID');
+  return bookDir(bookId);
+}
+
+function safeChapterId(chapterId) {
+  // Current scenes begin `ch-`; accepting the older `scene-` fixture shape is
+  // safe too. The important boundary is that no path separator can enter.
+  if (typeof chapterId !== 'string' || !/^[a-z0-9][a-z0-9_-]{0,127}$/i.test(chapterId)) {
+    throw new Error('Invalid scene ID');
+  }
+  return chapterId;
+}
+
+function safeAuxName(name) {
+  if (name !== 'notes' && name !== 'outline') throw new Error('Invalid auxiliary document');
+  return name;
+}
+
+function safeJSONName(name) {
+  const names = new Set(['notes', 'outline', 'darlings', 'stickies', 'screenplay-outline', 'recovery']);
+  if (!names.has(name)) throw new Error('Invalid screenplay data name');
+  return name;
+}
+
 ipcMain.handle('aux:read', (_e, bookId, name) => {
   // name: 'notes' | 'outline'
-  const file = path.join(bookDir(bookId), name + '.html');
+  const file = path.join(safeBookDir(bookId), safeAuxName(name) + '.html');
   try {
     return fs.readFileSync(file, 'utf8');
   } catch {
@@ -170,20 +328,23 @@ ipcMain.handle('aux:read', (_e, bookId, name) => {
 });
 
 ipcMain.handle('aux:write', (_e, bookId, name, html) => {
-  fs.writeFileSync(path.join(bookDir(bookId), name + '.html'), html);
+  atomicWrite(path.join(safeBookDir(bookId), safeAuxName(name) + '.html'), html, 'utf8');
+  scheduleBackups();
   return true;
 });
 
 ipcMain.handle('json:read', (_e, bookId, name, fallback) => {
-  return readJSON(path.join(bookDir(bookId), name + '.json'), fallback);
+  return readJSON(path.join(safeBookDir(bookId), safeJSONName(name) + '.json'), fallback);
 });
 
 ipcMain.handle('json:write', (_e, bookId, name, data) => {
-  writeJSON(path.join(bookDir(bookId), name + '.json'), data);
+  writeJSON(path.join(safeBookDir(bookId), safeJSONName(name) + '.json'), data);
+  scheduleBackups();
   return true;
 });
 
 ipcMain.handle('book:delete', async (_e, bookId, title) => {
+  const dir = safeBookDir(bookId);
   const win = BrowserWindow.getFocusedWindow();
   const { response } = await dialog.showMessageBox(win, {
     type: 'warning',
@@ -196,15 +357,15 @@ ipcMain.handle('book:delete', async (_e, bookId, title) => {
   if (response === 1) {
     const { shell } = require('electron');
     try {
-      await shell.trashItem(bookDir(bookId));
+      await shell.trashItem(dir);
       return true;
     } catch (err) {
       // Some filesystems have no Trash (network mounts, odd drives).
       // Words are never lost: leave the book alone and show the writer where it lives.
       logError('trash', err);
-      shell.showItemInFolder(bookDir(bookId));
+      shell.showItemInFolder(dir);
       dialog.showMessageBox(win, {
-        message: 'NEO couldn’t move that folder to the Trash.',
+        message: 'ScriptWriter couldn’t move that folder to the Recycle Bin.',
         detail: 'The book is untouched. Its folder is highlighted so you can deal with it yourself.'
       });
       return false;
@@ -241,7 +402,7 @@ function clearCovers(dir) {
 ipcMain.handle('cover:set', (_e, bookId, srcPath) => {
   const ext = path.extname(srcPath).toLowerCase().replace('.', '');
   if (!COVER_EXTS.includes(ext)) return null;
-  const dir = bookDir(bookId);
+  const dir = safeBookDir(bookId);
   if (!fs.existsSync(dir)) return null;
   clearCovers(dir);
   const fname = 'cover-' + Date.now() + '.' + (ext === 'jpeg' ? 'jpg' : ext);
@@ -250,7 +411,7 @@ ipcMain.handle('cover:set', (_e, bookId, srcPath) => {
 });
 
 ipcMain.handle('cover:remove', (_e, bookId) => {
-  const dir = bookDir(bookId);
+  const dir = safeBookDir(bookId);
   if (fs.existsSync(dir)) clearCovers(dir);
   return true;
 });
@@ -258,7 +419,7 @@ ipcMain.handle('cover:remove', (_e, bookId) => {
 ipcMain.handle('cover:read', (_e, bookId, fname) => {
   try {
     if (!/^(cover|art)-\d+\.(png|jpg|webp)$/.test(fname)) return null;
-    const buf = fs.readFileSync(path.join(bookDir(bookId), fname));
+    const buf = fs.readFileSync(path.join(safeBookDir(bookId), fname));
     const ext = path.extname(fname).slice(1);
     const mime = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
     return { base64: buf.toString('base64'), mime, ext };
@@ -317,7 +478,7 @@ ipcMain.handle('cover:paint', (_e, bookId, text, options) => {
     const provider = (options && options.provider) || 'openai';
     const apiKey = readSecret(provider);
     if (!apiKey) return { error: 'No API key for ' + provider + ' — add one under File → Cover Art…' };
-    const dir = bookDir(bookId);
+    const dir = safeBookDir(bookId);
     if (!fs.existsSync(dir)) return { error: 'Book folder is missing' };
     try {
       const art = require('./art.js');
@@ -380,15 +541,19 @@ ipcMain.handle('fullscreen:escape', (e) => {
 // Export + email
 // ---------------------------------------------------------------------------
 
-async function renderPDF(html) {
+async function renderPDF(html, requestedPageSize) {
   const pdfWin = new BrowserWindow({ show: false, webPreferences: { sandbox: true } });
   // Letter is a North American habit; most of the world prints A4.
   const letterCountries = ['US', 'CA', 'MX', 'PH'];
   try {
     await pdfWin.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+    const pageSize = requestedPageSize === 'Letter' || requestedPageSize === 'A4'
+      ? requestedPageSize
+      : (letterCountries.includes(app.getLocaleCountryCode()) ? 'Letter' : 'A4');
     return await pdfWin.webContents.printToPDF({
-      pageSize: letterCountries.includes(app.getLocaleCountryCode()) ? 'Letter' : 'A4',
-      margins: { top: 1, bottom: 1, left: 1, right: 1 },
+      pageSize,
+      preferCSSPageSize: true,
+      margins: { top: 0, bottom: 0, left: 0, right: 0 },
       printBackground: false
     });
   } finally {
@@ -412,7 +577,7 @@ async function buildZip(zipEntries) {
   });
 }
 
-ipcMain.handle('export:save', async (_e, { format, defaultName, content, zipEntries }) => {
+ipcMain.handle('export:save', async (_e, { format, defaultName, content, zipEntries, pageSize }) => {
   const win = BrowserWindow.getFocusedWindow();
   const { canceled, filePath } = await dialog.showSaveDialog(win, {
     defaultPath: path.join(os.homedir(), 'Documents', defaultName + '.' + format),
@@ -422,7 +587,7 @@ ipcMain.handle('export:save', async (_e, { format, defaultName, content, zipEntr
   if (zipEntries) {
     fs.writeFileSync(filePath, await buildZip(zipEntries));
   } else if (format === 'pdf') {
-    fs.writeFileSync(filePath, await renderPDF(content));
+    fs.writeFileSync(filePath, await renderPDF(content, pageSize));
   } else {
     fs.writeFileSync(filePath, content, 'utf8');
   }
@@ -431,13 +596,13 @@ ipcMain.handle('export:save', async (_e, { format, defaultName, content, zipEntr
 
 // Writes a timestamped snapshot to the library's Exports folder, then hands it
 // to your email — an outside-the-machine paper trail for provenance.
-ipcMain.handle('email:draft', async (_e, { to, subject, body, html, defaultName, method }) => {
+ipcMain.handle('email:draft', async (_e, { to, subject, body, html, defaultName, method, pageSize }) => {
   const { shell } = require('electron');
   const exportsDir = path.join(LIBRARY_DIR, 'Exports');
   if (!fs.existsSync(exportsDir)) fs.mkdirSync(exportsDir, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   const file = path.join(exportsDir, `${defaultName}-${stamp}.pdf`);
-  fs.writeFileSync(file, await renderPDF(html));
+  fs.writeFileSync(file, await renderPDF(html, pageSize));
 
   if (method === 'gmail') {
     // Gmail compose in the browser can't take an attachment from outside,
@@ -619,7 +784,7 @@ ipcMain.handle('import:pick', async () => {
 // ---------------------------------------------------------------------------
 // Robustness: error log, daily backups, single instance
 // ---------------------------------------------------------------------------
-const ERROR_LOG = () => path.join(LIBRARY_DIR, 'neo-errors.log');
+const ERROR_LOG = () => path.join(LIBRARY_DIR, 'scriptwriter-errors.log');
 
 function logError(source, err) {
   try {
@@ -633,39 +798,187 @@ process.on('uncaughtException', (err) => logError('main', err));
 process.on('unhandledRejection', (err) => logError('main-promise', err));
 ipcMain.handle('log:error', (_e, msg) => logError('renderer', msg));
 
-// One zip of the whole library per day, keeping the last 14. Cheap insurance.
-async function dailyBackup() {
+function screenplayFiles(dir) {
+  const files = [];
+  const walk = (base, rel) => {
+    for (const name of fs.readdirSync(base).sort()) {
+      if (name === 'Backups' || name === 'recovery.json') continue;
+      const full = path.join(base, name);
+      const relative = rel ? rel + '/' + name : name;
+      if (fs.statSync(full).isDirectory()) walk(full, relative);
+      else files.push({ full, relative });
+    }
+  };
+  walk(dir, '');
+  return files;
+}
+
+function screenplayFingerprint(dir) {
+  const hash = crypto.createHash('sha256');
+  for (const file of screenplayFiles(dir)) {
+    hash.update(file.relative).update('\0').update(fs.readFileSync(file.full)).update('\0');
+  }
+  return hash.digest('hex');
+}
+
+async function backupScreenplay(dir, bookId) {
+  if (!fs.existsSync(dir)) return;
+  const files = screenplayFiles(dir);
+  if (!files.length) return;
+  const digest = screenplayFingerprint(dir);
+  const backupsDir = path.join(dir, 'Backups');
+  fs.mkdirSync(backupsDir, { recursive: true });
+  const day = new Date().toISOString().slice(0, 10);
+  const target = path.join(backupsDir, `scriptwriter-backup-${day}.zip`);
+  if (fs.existsSync(target)) {
+    try {
+      const existing = await require('jszip').loadAsync(fs.readFileSync(target));
+      const manifest = JSON.parse(await existing.file('_scriptwriter_backup.json').async('string'));
+      if (manifest.fingerprint === digest) return;
+    } catch { /* replace an unreadable daily archive with a fresh safe copy */ }
+  }
+  const JSZip = require('jszip');
+  const zip = new JSZip();
+  for (const file of files) zip.file(file.relative, fs.readFileSync(file.full));
+  zip.file('_scriptwriter_backup.json', JSON.stringify({ bookId, date: day, fingerprint: digest }, null, 2));
+  const tmp = target + '.' + process.pid + '.tmp';
   try {
-    ensureLibrary();
-    const backupsDir = path.join(LIBRARY_DIR, 'Backups');
-    if (!fs.existsSync(backupsDir)) fs.mkdirSync(backupsDir, { recursive: true });
-    const today = new Date().toISOString().slice(0, 10);
-    const target = path.join(backupsDir, `neo-backup-${today}.zip`);
-    if (fs.existsSync(target)) return;
-
-    const JSZip = require('jszip');
-    const zip = new JSZip();
-    const skip = new Set(['Backups', 'Exports']);
-    const walk = (dir, rel) => {
-      for (const name of fs.readdirSync(dir)) {
-        if (rel === '' && skip.has(name)) continue;
-        const full = path.join(dir, name);
-        const relPath = rel ? rel + '/' + name : name;
-        const stat = fs.statSync(full);
-        if (stat.isDirectory()) walk(full, relPath);
-        else zip.file(relPath, fs.readFileSync(full));
-      }
-    };
-    walk(LIBRARY_DIR, '');
-    fs.writeFileSync(target, await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }));
-
-    // prune old backups
-    const backups = fs.readdirSync(backupsDir).filter((f) => f.startsWith('neo-backup-')).sort();
-    while (backups.length > 14) fs.unlinkSync(path.join(backupsDir, backups.shift()));
+    fs.writeFileSync(tmp, await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }));
+    fs.renameSync(tmp, target);
   } catch (err) {
-    logError('backup', err);
+    try { fs.unlinkSync(tmp); } catch { /* cleanup only */ }
+    throw err;
+  }
+  const old = fs.readdirSync(backupsDir)
+    .filter((name) => /^scriptwriter-backup-\d{4}-\d{2}-\d{2}\.zip$/.test(name))
+    .sort();
+  while (old.length > 14) fs.unlinkSync(path.join(backupsDir, old.shift()));
+}
+
+async function dailyBackup() {
+  ensureLibrary();
+  for (const name of fs.readdirSync(LIBRARY_DIR)) {
+    if (!/^book-[a-z0-9-]+$/i.test(name)) continue;
+    try { await backupScreenplay(path.join(LIBRARY_DIR, name), name); }
+    catch (err) { logError('backup:' + name, err); }
   }
 }
+
+let backupTimer = null;
+function scheduleBackups() {
+  if (backupTimer) clearTimeout(backupTimer);
+  backupTimer = setTimeout(() => {
+    backupTimer = null;
+    dailyBackup().catch((err) => logError('backup', err));
+  }, 5000);
+  if (backupTimer.unref) backupTimer.unref();
+}
+
+ipcMain.handle('backup:list', (_e, bookId) => {
+  const dir = safeBookDir(bookId);
+  const backupsDir = path.join(dir, 'Backups');
+  if (!fs.existsSync(backupsDir)) return [];
+  return fs.readdirSync(backupsDir)
+    .filter((name) => /^scriptwriter-backup-\d{4}-\d{2}-\d{2}\.zip$/.test(name))
+    .sort().reverse();
+});
+
+ipcMain.handle('backup:restore', async (_e, bookId, archiveName) => {
+  const sourceDir = safeBookDir(bookId);
+  if (typeof archiveName !== 'string' || !/^scriptwriter-backup-\d{4}-\d{2}-\d{2}\.zip$/.test(archiveName)) {
+    throw new Error('Invalid backup name');
+  }
+  const archivePath = path.join(sourceDir, 'Backups', archiveName);
+  const zip = await require('jszip').loadAsync(fs.readFileSync(archivePath));
+  const id = 'book-recovered-' + Date.now().toString(36) + '-' + crypto.randomBytes(3).toString('hex');
+  const targetDir = safeBookDir(id);
+  fs.mkdirSync(targetDir, { recursive: false });
+  try {
+    for (const [relative, entry] of Object.entries(zip.files)) {
+      if (entry.dir || relative === '_scriptwriter_backup.json') continue;
+      if (relative.includes('\\') || path.posix.isAbsolute(relative) || /^[a-z]:/i.test(relative)) {
+        throw new Error('Unsafe backup path');
+      }
+      const normalized = path.posix.normalize(relative);
+      if (normalized === '..' || normalized.startsWith('../')) throw new Error('Unsafe backup path');
+      const dest = path.resolve(targetDir, ...normalized.split('/'));
+      const root = path.resolve(targetDir) + path.sep;
+      if (!dest.startsWith(root)) throw new Error('Unsafe backup path');
+      const bytes = await entry.async('nodebuffer');
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      atomicWrite(dest, bytes);
+    }
+    const metaFile = path.join(targetDir, 'book.json');
+    const meta = readJSON(metaFile, null);
+    if (!meta) throw new Error('Backup does not contain screenplay metadata');
+    meta.id = id;
+    meta.title = (meta.title || 'Recovered Screenplay') + ' (Recovered Copy)';
+    meta.modified = new Date().toISOString();
+    writeJSON(metaFile, meta);
+    writeCatalog();
+    return meta;
+  } catch (err) {
+    fs.rmSync(targetDir, { recursive: true, force: true });
+    throw err;
+  }
+});
+
+let shutdownPending = false;
+let allowShutdown = false;
+let shutdownTimer = null;
+async function completeShutdown() {
+  if (allowShutdown) return;
+  if (shutdownTimer) clearTimeout(shutdownTimer);
+  shutdownTimer = null;
+  try { await dailyBackup(); } catch (err) { logError('shutdown-backup', err); }
+  allowShutdown = true;
+  const win = BrowserWindow.getAllWindows()[0];
+  if (win && !win.isDestroyed()) win.close();
+  else app.quit();
+}
+
+function requestRendererFlush() {
+  if (shutdownPending) return;
+  shutdownPending = true;
+  const win = BrowserWindow.getAllWindows()[0];
+  if (!win || win.isDestroyed()) {
+    completeShutdown();
+    return;
+  }
+  win.webContents.send('app:beforeQuit');
+  shutdownTimer = setTimeout(() => {
+    logError('shutdown', 'Renderer did not acknowledge save flush within 10 seconds');
+    shutdownPending = false;
+    const win = BrowserWindow.getAllWindows()[0];
+    if (win && !win.isDestroyed()) {
+      dialog.showMessageBox(win, {
+        type: 'warning',
+        buttons: ['Keep Writing'],
+        defaultId: 0,
+        message: 'ScriptWriter could not confirm that pending edits were saved.',
+        detail: 'The app is still open. Wait for saving to finish, then try closing again.'
+      });
+    }
+  }, 10000);
+}
+
+ipcMain.handle('app:flushComplete', async (_e, saved = true) => {
+  if (!shutdownPending) return false;
+  if (!saved) {
+    shutdownPending = false;
+    if (shutdownTimer) clearTimeout(shutdownTimer);
+    shutdownTimer = null;
+    return false;
+  }
+  await completeShutdown();
+  return true;
+});
+
+app.on('before-quit', (event) => {
+  if (allowShutdown || !BrowserWindow.getAllWindows().length) return;
+  event.preventDefault();
+  requestRendererFlush();
+});
 
 // ---------------------------------------------------------------------------
 // Window
@@ -677,6 +990,7 @@ function createWindow() {
     minWidth: 800,
     minHeight: 600,
     titleBarStyle: 'hiddenInset',
+    autoHideMenuBar: true,
     backgroundColor: '#191919',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -688,6 +1002,11 @@ function createWindow() {
       spellcheck: true
     }
   });
+  win.on('close', (event) => {
+    if (allowShutdown) return;
+    event.preventDefault();
+    requestRendererFlush();
+  });
   win.loadFile('index.html');
 
   // NEO does its own spellchecking (see spell:* handlers) — the engine's
@@ -696,39 +1015,101 @@ function createWindow() {
 }
 
 // ---------------------------------------------------------------------------
-// Spellcheck: NEO's own dictionary (Hunspell en-US via nspell), identical on
-// every platform. The renderer paints the squiggles and asks for suggestions.
+// Spellcheck: ScriptWriter's own Hunspell dictionaries. The renderer paints
+// the squiggles and asks for suggestions, while this process owns the selected
+// language and the learned-word list.
 // ---------------------------------------------------------------------------
 let neoSpell = null;
+let spellLanguage = 'en-GB';
+let spellLoadRevision = 0;
+let spellLoadPromise = Promise.resolve();
+
+const SPELL_LANGUAGES = {
+  'en-GB': { label: 'English (UK)', module: 'dictionary-en-gb' },
+  'en-US': { label: 'English (US)', module: 'dictionary-en-us' }
+};
+
+function configuredSpellLanguage() {
+  const saved = readJSON(LIBRARY_FILE, {})?.spellLanguage;
+  return Object.hasOwn(SPELL_LANGUAGES, saved) ? saved : 'en-GB';
+}
+
+function loadSpell(language) {
+  const selected = Object.hasOwn(SPELL_LANGUAGES, language) ? language : 'en-GB';
+  const revision = ++spellLoadRevision;
+  spellLanguage = selected;
+  neoSpell = null;
+
+  spellLoadPromise = (async () => {
+    const nspell = require('nspell');
+    // dictionary-en-gb is ESM while the older US package is CommonJS. Dynamic
+    // import supports both shapes and keeps the loading detail out of the UI.
+    const loaded = await import(SPELL_LANGUAGES[selected].module);
+    const dictionary = loaded.default || loaded;
+    const dict = typeof dictionary === 'function'
+      ? await new Promise((resolve, reject) => dictionary((err, value) => err ? reject(err) : resolve(value)))
+      : dictionary;
+    if (revision !== spellLoadRevision) return;
+    const checker = nspell(dict);
+    try {
+      for (const word of readJSON(LIBRARY_FILE, {})?.customWords || []) checker.add(word);
+    } catch { /* custom words are a nicety */ }
+    if (revision === spellLoadRevision) neoSpell = checker;
+  })().catch((err) => { logError('spell', err); throw err; });
+  spellLoadPromise.catch(() => {});
+}
 
 function initSpell() {
-  try {
-    const nspell = require('nspell');
-    require('dictionary-en-us')((err, dict) => {
-      if (err) { logError('spell', err); return; }
-      neoSpell = nspell(dict);
-      try {
-        const lib = readJSON(LIBRARY_FILE, {});
-        for (const w of lib.customWords || []) neoSpell.add(w);
-      } catch { /* custom words are a nicety */ }
-    });
-  } catch (err) {
-    logError('spell', err);
+  loadSpell(configuredSpellLanguage());
+}
+
+async function waitForSpell() {
+  while (true) {
+    const revision = spellLoadRevision;
+    await spellLoadPromise;
+    if (revision === spellLoadRevision) return;
   }
 }
 
-ipcMain.handle('spell:check', (_e, words) => {
+ipcMain.handle('spell:check', async (_e, words) => {
+  await waitForSpell();
   const out = {};
-  // dictionary still loading: report everything correct rather than crying wolf
-  for (const w of words) out[w] = neoSpell ? neoSpell.correct(w) : true;
+  for (const word of Array.isArray(words) ? words : []) {
+    if (typeof word === 'string') out[word] = neoSpell ? neoSpell.correct(word) : true;
+  }
   return out;
 });
 
-ipcMain.handle('spell:suggest', (_e, word) => (neoSpell ? neoSpell.suggest(word).slice(0, 6) : []));
+ipcMain.handle('spell:suggest', async (_e, word) => {
+  await waitForSpell();
+  return neoSpell && typeof word === 'string' ? neoSpell.suggest(word).slice(0, 12) : [];
+});
 
 ipcMain.handle('spell:learn', (_e, word) => {
-  if (neoSpell && typeof word === 'string') neoSpell.add(word);
+  const learned = typeof word === 'string' ? word.trim() : '';
+  if (!learned) return false;
+  if (neoSpell) neoSpell.add(learned);
+  const library = readJSON(LIBRARY_FILE, {});
+  const customWords = Array.isArray(library.customWords) ? library.customWords : [];
+  if (!customWords.some((known) => typeof known === 'string' && known.toLocaleLowerCase() === learned.toLocaleLowerCase())) {
+    library.customWords = [...customWords, learned];
+    writeJSON(LIBRARY_FILE, library);
+  }
   return true;
+});
+
+ipcMain.handle('spell:settings', () => ({
+  language: spellLanguage,
+  languages: Object.entries(SPELL_LANGUAGES).map(([code, details]) => ({ code, label: details.label }))
+}));
+
+ipcMain.handle('spell:setLanguage', (_e, language) => {
+  if (!Object.hasOwn(SPELL_LANGUAGES, language)) return { ok: false, language: spellLanguage };
+  const library = readJSON(LIBRARY_FILE, {});
+  library.spellLanguage = language;
+  writeJSON(LIBRARY_FILE, library);
+  loadSpell(language);
+  return { ok: true, language };
 });
 
 // ---------------------------------------------------------------------------
@@ -741,9 +1122,6 @@ function sendToWindow(msg) {
 
 function buildMenu() {
   const isMac = process.platform === 'darwin';
-  const bodyFonts = isMac
-    ? ['Georgia', 'Palatino', 'Baskerville', 'Hoefler Text', 'Iowan Old Style']
-    : ['Georgia', 'Palatino', 'Baskerville', 'Cambria', 'Constantia'];
   const template = [
     // appMenu exists only on macOS — including it on Windows throws,
     // which is exactly what kept NEO from ever opening a window there
@@ -754,33 +1132,16 @@ function buildMenu() {
         {
           label: 'Export',
           submenu: [
-            { label: 'Plain Text (.txt)', click: () => sendToWindow({ type: 'export', format: 'txt' }) },
-            { label: 'Markdown (.md)', click: () => sendToWindow({ type: 'export', format: 'md' }) },
-            { label: 'Web Page (.html)', click: () => sendToWindow({ type: 'export', format: 'html' }) },
-            { label: 'PDF (.pdf)', click: () => sendToWindow({ type: 'export', format: 'pdf' }) },
-            { label: 'Word (.docx)', click: () => sendToWindow({ type: 'export', format: 'docx' }) },
-            { label: 'EPUB (.epub)', click: () => sendToWindow({ type: 'export', format: 'epub' }) }
+            { label: 'PDF (.pdf)', click: () => sendToWindow({ type: 'export', format: 'pdf' }) }
           ]
         },
         { type: 'separator' },
-        {
-          label: 'Email Draft to Myself',
-          accelerator: 'CmdOrCtrl+E',
-          click: () => sendToWindow({ type: 'emailDraft' })
-        },
-        { label: 'Email Settings…', click: () => sendToWindow({ type: 'emailSettings' }) },
-        { label: 'Cover Art…', click: () => sendToWindow({ type: 'coverArt' }) },
-        {
-          label: isMac ? 'Goals & Settings…' : 'Goals && Settings…',
-          accelerator: 'CmdOrCtrl+,',
-          click: () => sendToWindow({ type: 'stats' })
-        },
-        { type: 'separator' },
-        {
-          label: 'Import Manuscripts…',
-          accelerator: 'CmdOrCtrl+Shift+I',
-          click: () => sendToWindow({ type: 'import' })
-        },
+        { label: 'Title Page and Paper Size…', click: () => sendToWindow({ type: 'screenplaySettings' }) },
+        { label: 'Writing Settings…', click: () => sendToWindow({ type: 'writingSettings' }) },
+        { label: 'Keyboard Settings…', click: () => sendToWindow({ type: 'keyboardSettings' }) },
+        { label: 'Recover Unsaved Writing as Copy…', click: () => sendToWindow({ type: 'recoverUnsaved' }) },
+        { label: 'Restore Backup as Copy…', click: () => sendToWindow({ type: 'restoreBackup' }) },
+        { label: 'Open Library Folder', click: () => require('electron').shell.openPath(LIBRARY_DIR) },
         { type: 'separator' },
         ...(isMac ? [{ role: 'close' }] : [{ role: 'quit' }])
       ]
@@ -799,48 +1160,9 @@ function buildMenu() {
           click: () => sendToWindow({ type: 'find' })
         },
         {
-          label: 'Spellcheck Pass',
+          label: 'Review Spelling…',
           accelerator: 'CmdOrCtrl+;',
           click: () => sendToWindow({ type: 'spellcheck' })
-        }
-      ]
-    },
-    {
-      label: 'Format',
-      submenu: [
-        {
-          label: 'Body Font',
-          submenu: bodyFonts.map((f) => ({
-            label: f,
-            click: () => sendToWindow({ type: 'bodyFont', value: f })
-          }))
-        },
-        {
-          label: 'Drop Cap Style',
-          submenu: [
-            { label: 'Literary', click: () => sendToWindow({ type: 'dropCap', value: 'literary' }) },
-            { label: 'Fantasy', click: () => sendToWindow({ type: 'dropCap', value: 'fantasy' }) },
-            { label: 'Sci-Fi', click: () => sendToWindow({ type: 'dropCap', value: 'scifi' }) }
-          ]
-        },
-        {
-          label: 'Align Paragraph',
-          submenu: [
-            { label: 'Left', click: () => sendToWindow({ type: 'align', value: 'left' }) },
-            { label: 'Center', click: () => sendToWindow({ type: 'align', value: 'center' }) },
-            { label: 'Right', click: () => sendToWindow({ type: 'align', value: 'right' }) },
-            { label: 'Justify', click: () => sendToWindow({ type: 'align', value: 'justify' }) }
-          ]
-        },
-        { type: 'separator' },
-        { label: 'Larger Text', accelerator: 'CmdOrCtrl+=', click: () => sendToWindow({ type: 'fontSize', value: 1 }) },
-        { label: 'Smaller Text', accelerator: 'CmdOrCtrl+-', click: () => sendToWindow({ type: 'fontSize', value: -1 }) },
-        { label: 'Reset Text Size', accelerator: 'CmdOrCtrl+0', click: () => sendToWindow({ type: 'fontSize', value: 0 }) },
-        { type: 'separator' },
-        {
-          label: 'Typewriter Scrolling',
-          accelerator: 'CmdOrCtrl+Shift+T',
-          click: () => sendToWindow({ type: 'typewriter' })
         }
       ]
     },
@@ -874,71 +1196,29 @@ function buildMenu() {
       label: 'Help',
       submenu: [
         {
-          label: 'NEO Shortcuts',
+          label: 'ScriptWriter Shortcuts',
           accelerator: 'CmdOrCtrl+/',
           click: () => sendToWindow({ type: 'help' })
         },
         { type: 'separator' },
         {
-          label: 'About NEO',
+          label: 'About ScriptWriter',
           click: () => sendToWindow({ type: 'about' })
         },
-        {
-          label: 'Check for Update…',
-          click: () => sendToWindow({ type: 'checkUpdate' })
-        }
       ]
     }
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
-}
-
-// Manual update check (Help → Check for Update…): a direct GitHub Releases
-// lookup, separate from the silent auto-updater. Works in dev builds too.
-let lastReleaseUrl = null;
-
-function compareVersions(a, b) {
-  const pa = a.split('.').map(Number);
-  const pb = b.split('.').map(Number);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const na = pa[i] || 0, nb = pb[i] || 0;
-    if (na !== nb) return na - nb;
+  // Windows keeps the File/Edit menu available via Alt, but the writing
+  // window does not spend permanent space on it.
+  if (process.platform === 'win32') {
+    for (const window of BrowserWindow.getAllWindows()) window.setMenuBarVisibility(false);
   }
-  return 0;
 }
 
-// toggling at the session level forces the engine to re-scan visible text —
-// newer Chromium ignores attribute changes on text it has already looked at
 ipcMain.handle('app:version', () => app.getVersion());
-
-ipcMain.handle('update:check', async () => {
-  try {
-    const res = await fetch('https://api.github.com/repos/hughhowey/neo/releases/latest', {
-      headers: { 'User-Agent': 'NEO-App' }
-    });
-    if (!res.ok) throw new Error('GitHub API returned ' + res.status);
-    const data = await res.json();
-    const latestVersion = String(data.tag_name || '').replace(/^v/, '');
-    const currentVersion = app.getVersion();
-    lastReleaseUrl = data.html_url || null;
-    return {
-      hasUpdate: !!latestVersion && compareVersions(latestVersion, currentVersion) > 0,
-      latestVersion,
-      currentVersion
-    };
-  } catch (err) {
-    logError('update', err);
-    return { error: true };
-  }
-});
-
-// the renderer may only open the release page fetched above — never arbitrary URLs
-ipcMain.handle('update:openRelease', () => {
-  if (lastReleaseUrl && /^https:\/\/github\.com\//.test(lastReleaseUrl)) {
-    require('electron').shell.openExternal(lastReleaseUrl);
-  }
-  return true;
-});
+ipcMain.handle('update:check', () => ({ disabled: true, currentVersion: app.getVersion() }));
+ipcMain.handle('update:openRelease', () => false);
 
 // Two copies of NEO editing the same library is how words get eaten
 if (!app.requestSingleInstanceLock()) {
@@ -953,21 +1233,6 @@ if (!app.requestSingleInstanceLock()) {
   });
 }
 
-// Auto-update from GitHub releases. Deliberately defensive: any failure is
-// logged and swallowed, so an unsigned build or offline machine never notices.
-// (macOS auto-update only works once the app is code-signed.)
-function checkForUpdates() {
-  if (!app.isPackaged) return;
-  try {
-    const { autoUpdater } = require('electron-updater');
-    autoUpdater.logger = null;
-    autoUpdater.on('error', (err) => logError('updater', err));
-    autoUpdater.checkForUpdatesAndNotify().catch((err) => logError('updater', err));
-  } catch (err) {
-    logError('updater', err);
-  }
-}
-
 app.whenReady().then(() => {
   // Packaged builds get name/icon from electron-builder; this covers `npm start`.
   try {
@@ -975,7 +1240,7 @@ app.whenReady().then(() => {
     if (process.platform === 'darwin' && fs.existsSync(devIcon)) {
       if (app.dock) app.dock.setIcon(devIcon);
       app.setAboutPanelOptions({
-        applicationName: 'NEO',
+        applicationName: 'ScriptWriter',
         applicationVersion: app.getVersion(),
         iconPath: devIcon
       });
@@ -987,8 +1252,14 @@ app.whenReady().then(() => {
   try {
     // the real Documents folder (handles OneDrive-redirected Windows setups)
     try {
-      LIBRARY_DIR = path.join(app.getPath('documents'), 'NEO Library');
+      const envLibrary = process.env.SCRIPTWRITER_LIBRARY;
+      LIBRARY_DIR = envLibrary || path.join(app.getPath('documents'), 'ScriptWriter Library');
       LIBRARY_FILE = path.join(LIBRARY_DIR, 'library.json');
+      const isolatedUserData = envLibrary
+        ? envLibrary + '-user-data'
+        : path.join(app.getPath('appData'), 'ScriptWriter');
+      fs.mkdirSync(isolatedUserData, { recursive: true });
+      app.setPath('userData', isolatedUserData);
     } catch (err) {
       logError('paths', err);
     }
@@ -1013,14 +1284,12 @@ app.whenReady().then(() => {
     createWindow();
     try { initSpell(); } catch (err) { logError('spell', err); }
     try { buildMenu(); } catch (err) { logError('menu', err); }
-    try { dailyBackup(); } catch (err) { logError('backup', err); }
-    try { checkForUpdates(); } catch (err) { logError('updater', err); }
+    dailyBackup().catch((err) => logError('backup', err));
   } catch (err) {
     // catastrophic: tell the human instead of dying in silence
     logError('startup', err);
     try {
-      dialog.showErrorBox('NEO failed to start',
-        'Please report this at github.com/hughhowey/neo/issues:\n\n' + String((err && err.stack) || err));
+      dialog.showErrorBox('ScriptWriter failed to start', String((err && err.stack) || err));
     } catch { /* nothing left to try */ }
   }
   app.on('activate', () => {

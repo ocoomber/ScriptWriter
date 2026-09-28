@@ -22,7 +22,55 @@ const K = (mac, pc) => (IS_MAC ? mac : pc);
 const KZ = K('⌘Z', 'Ctrl+Z');
 const KPH = K('⌘⇧X', 'Ctrl+Shift+X');
 const KDA = K('⌘⇧D', 'Ctrl+Shift+D');
-const KHELP = K('⌘/', 'Ctrl+/');
+
+// Chapter files and Darlings are deliberately readable HTML on disk, so treat
+// them as untrusted whenever they come back into the renderer.  Parse in an
+// inert document and rebuild only the small bit of markup ScriptWriter uses.
+// This is also exported as a traditional global for screenplay.js' restore
+// path.
+function sanitizeScreenplayHtml(html) {
+  const source = new DOMParser().parseFromString(String(html || ''), 'text/html').body;
+  const elementTypes = new Set(['action', 'scene-heading', 'character', 'dialogue', 'parenthetical', 'transition']);
+  const droppedTags = new Set(['SCRIPT', 'STYLE', 'TITLE', 'META', 'LINK', 'BASE', 'IMG', 'SVG', 'MATH', 'OBJECT', 'EMBED', 'IFRAME', 'FRAME', 'FRAMESET', 'FORM', 'INPUT', 'TEXTAREA', 'BUTTON', 'SELECT', 'OPTION', 'VIDEO', 'AUDIO', 'SOURCE', 'TRACK', 'CANVAS', 'TEMPLATE', 'NOSCRIPT']);
+  const escape = (value) => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  const safeId = (value) => String(value || '').slice(0, 160);
+  const walk = (node) => {
+    if (node.nodeType === Node.TEXT_NODE) return escape(node.data);
+    if (node.nodeType !== Node.ELEMENT_NODE) return '';
+    const tag = node.tagName;
+    if (droppedTags.has(tag)) return '';
+    const children = [...node.childNodes].map(walk).join('');
+    if (tag === 'P') {
+      const attrs = [];
+      const type = node.getAttribute('data-element');
+      if (elementTypes.has(type)) attrs.push(`data-element="${escape(type)}"`);
+      const id = node.getAttribute('data-id');
+      if (id) attrs.push(`data-id="${escape(safeId(id))}"`);
+      const classes = ['screenplay-element', 'sp-block', 'scene-break', 'ghost'].filter((name) => node.classList.contains(name));
+      if (classes.length) attrs.push(`class="${classes.join(' ')}"`);
+      for (const name of ['data-sec-id', 'data-sec-brk']) {
+        const value = node.getAttribute(name);
+        if (value) attrs.push(`${name}="${escape(safeId(value))}"`);
+      }
+      return `<p${attrs.length ? ' ' + attrs.join(' ') : ''}>${children}</p>`;
+    }
+    if (tag === 'BR') return '<br>';
+    if (tag === 'B' || tag === 'STRONG' || tag === 'I' || tag === 'EM' || tag === 'U') return `<${tag.toLowerCase()}>${children}</${tag.toLowerCase()}>`;
+    if (tag === 'SPAN' && node.classList.contains('ph-mark')) {
+      const sid = node.getAttribute('data-sid');
+      return sid ? `<span class="ph-mark" data-sid="${escape(safeId(sid))}" contenteditable="false">⚑</span>` : '';
+    }
+    if (tag === 'SPAN') {
+      let formatted = children;
+      if (/\bunderline\b/i.test(node.style.textDecorationLine || node.style.textDecoration)) formatted = `<u>${formatted}</u>`;
+      if (/\bitalic\b/i.test(node.style.fontStyle)) formatted = `<i>${formatted}</i>`;
+      if (/\bbold\b/i.test(node.style.fontWeight) || Number(node.style.fontWeight) >= 600) formatted = `<b>${formatted}</b>`;
+      return formatted;
+    }
+    return children;
+  };
+  return [...source.childNodes].map(walk).join('');
+}
 
 // Scrollbars stay invisible until you scroll, then fade away again —
 // chrome only when needed.
@@ -40,15 +88,17 @@ function askInput(title, placeholder, value = '') {
     bd.className = 'modal-backdrop';
     bd.innerHTML = `
       <div class="modal" style="width:380px">
-        <h2 style="font-size:16px">${title}</h2>
-        <input type="text" spellcheck="false" placeholder="${placeholder}" />
+        <h2 class="m-title" style="font-size:16px"></h2>
+        <input type="text" spellcheck="false" />
         <div style="text-align:right;margin-top:14px">
           <button class="m-cancel btn-quiet" style="margin-right:10px">Cancel</button>
           <button class="m-ok btn-gold">OK</button>
         </div>
       </div>`;
     document.body.appendChild(bd);
+    bd.querySelector('.m-title').textContent = title;
     const input = bd.querySelector('input');
+    input.placeholder = placeholder;
     input.value = value;
     input.focus();
     input.select();
@@ -67,21 +117,32 @@ function optionModal(title, message, options) {
   return new Promise((resolve) => {
     const bd = document.createElement('div');
     bd.className = 'modal-backdrop';
-    const buttons = options.map((o, i) =>
-      `<button class="fr-choice" data-i="${i}" style="width:100%;margin-bottom:8px;${o.danger ? 'border-color:#6b3a34' : ''}">
-        <strong${o.danger ? ' style="color:#d97b6c"' : ''}>${o.label}</strong>
-        ${o.desc ? `<span>${o.desc}</span>` : ''}
-      </button>`).join('');
     bd.innerHTML = `
       <div class="modal" style="width:420px">
-        <h2 style="font-size:16px">${title}</h2>
-        ${message ? `<p>${message}</p>` : ''}
-        ${buttons}
+        <h2 class="m-title" style="font-size:16px"></h2>
+        <p class="m-message" hidden></p>
+        <div class="m-options"></div>
         <div style="text-align:right;margin-top:6px">
           <button class="m-cancel btn-quiet">Cancel</button>
         </div>
       </div>`;
     document.body.appendChild(bd);
+    bd.querySelector('.m-title').textContent = title;
+    const messageEl = bd.querySelector('.m-message');
+    if (message) { messageEl.textContent = message; messageEl.hidden = false; }
+    const choices = bd.querySelector('.m-options');
+    options.forEach((o, i) => {
+      const choice = document.createElement('button');
+      choice.className = 'fr-choice';
+      choice.dataset.i = i;
+      choice.style.cssText = 'width:100%;margin-bottom:8px' + (o.danger ? ';border-color:#6b3a34' : '');
+      const label = document.createElement('strong');
+      label.textContent = o.label;
+      if (o.danger) label.style.color = '#d97b6c';
+      choice.appendChild(label);
+      if (o.desc) { const desc = document.createElement('span'); desc.textContent = o.desc; choice.appendChild(desc); }
+      choices.appendChild(choice);
+    });
     const done = (val) => { bd.remove(); resolve(val); };
     bd.querySelectorAll('.fr-choice').forEach((b) => {
       b.onclick = () => done(options[+b.dataset.i].value);
@@ -104,7 +165,7 @@ const countWords = (text) => (text.trim().match(/\S+/g) || []).length;
 function cleanChapterEl(id) {
   const el = document.querySelector(`.chapter[data-id="${id}"] .chapter-body`);
   const holder = document.createElement('div');
-  holder.innerHTML = el ? el.innerHTML : (chapterHTML[id] || '');
+  holder.innerHTML = sanitizeScreenplayHtml(el ? el.innerHTML : (chapterHTML[id] || ''));
   holder.querySelectorAll('.darling-anchor, .ph-mark, .ghost').forEach((n) => n.remove());
   return holder;
 }
@@ -439,10 +500,11 @@ async function renderShelves() {
     }
 
     // the blank page — click to begin
-    const blank = document.createElement('div');
+    const blank = document.createElement('button');
     blank.className = 'new-book';
-    blank.textContent = '+';
-    blank.title = 'Start a new book';
+    blank.type = 'button';
+    blank.textContent = '+ New screenplay';
+    blank.title = 'Start a new screenplay';
     blank.onclick = () => createBookOnShelf(shelf);
     row.appendChild(blank);
 
@@ -682,7 +744,7 @@ async function requestPaint(meta, text) {
     const parts = [];
     for (const chId of (m && m.chapterOrder) || []) {
       const holder = document.createElement('div');
-      holder.innerHTML = await window.neo.readChapter(meta.id, chId);
+      holder.innerHTML = sanitizeScreenplayHtml(await window.neo.readChapter(meta.id, chId));
       holder.querySelectorAll('.darling-anchor, .ph-mark, .ghost').forEach((n) => n.remove());
       parts.push(holder.innerText);
     }
@@ -865,14 +927,17 @@ async function openBook(bookId) {
   tabPlaces = {}; // a fresh book starts with fresh places
   book = await window.neo.readBookMeta(bookId);
   if (!book) return;
+  book.tabNames = { notes: 'Notes', outline: 'Outline', ...(book.tabNames || {}) };
   currentChapterId = null; // never carry a chapter reference across books
   undoStack = [];
   chapterHTML = {};
   for (const chId of book.chapterOrder) {
-    chapterHTML[chId] = await window.neo.readChapter(bookId, chId);
+    chapterHTML[chId] = sanitizeScreenplayHtml(await window.neo.readChapter(bookId, chId));
   }
   stickies = await window.neo.readJSON(bookId, 'stickies', []);
-  darlings = await window.neo.readJSON(bookId, 'darlings', []);
+  darlings = (await window.neo.readJSON(bookId, 'darlings', [])).map((d) =>
+    d && typeof d === 'object' && d.html ? { ...d, html: sanitizeScreenplayHtml(d.html) } : d
+  );
 
   $('#bookshelf-view').hidden = true;
   $('#editor-view').hidden = false;
@@ -910,12 +975,6 @@ async function openBook(bookId) {
     }
   }
 
-  // the Enter hint shows once per library, ever
-  if (!library.hintShown) {
-    library.hintShown = true;
-    window.neo.writeLibrary(library);
-    setTimeout(() => toast(`Enter twice = section break · three times = new chapter · ${KHELP} shows everything else`, 7000), 800);
-  }
 }
 
 function renderChapters() {
@@ -968,7 +1027,7 @@ function renderChapters() {
     body.className = 'chapter-body';
     body.contentEditable = 'true';
     body.spellcheck = false; // NEO runs its own spellcheck pass
-    body.innerHTML = chapterHTML[chId] || '<p><br></p>';
+    body.innerHTML = sanitizeScreenplayHtml(chapterHTML[chId]) || '<p><br></p>';
     // older marks used a "?" that read as a broken image — normalize to the flag
     body.querySelectorAll('.ph-mark').forEach((m) => { m.textContent = '⚑'; });
     // heal the engine's style-junk spans left by past merges and splits
@@ -993,6 +1052,7 @@ function renderChapters() {
     wrap.appendChild(sec);
   });
   renderNav();
+  window.scheduleScreenplayLayout?.();
 }
 
 async function deleteChapterToDarlings(chId) {
@@ -1163,16 +1223,16 @@ function emptyChapterBackspace(e, body, chId) {
   return true;
 }
 
-// ⌘B / ⌘I applied by hand: the engine's native handling scrolls the
+// Formatting shortcuts applied by hand: the engine's native handling scrolls the
 // selection "into view" and mis-measures NEO's transformed page column,
 // throwing the reader to the top of the screen. Style, don't scroll.
 function styleKeepScroll(e) {
   if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return false;
-  if (e.code !== 'KeyB' && e.code !== 'KeyI') return false;
+  if (e.code !== 'KeyB' && e.code !== 'KeyI' && e.code !== 'KeyU') return false;
   e.preventDefault();
   const sc = $('#paper-scroll');
   const keep = sc.scrollTop;
-  document.execCommand(e.code === 'KeyB' ? 'bold' : 'italic');
+  document.execCommand({KeyB:'bold',KeyI:'italic',KeyU:'underline'}[e.code]);
   sc.scrollTop = keep;
   requestAnimationFrame(() => { sc.scrollTop = keep; });
   return true;
@@ -1577,6 +1637,7 @@ function syncChapter(body, chId) {
   scheduleChapterSave(chId);
   updateCounters();
   scheduleNavRefresh();
+  window.scheduleScreenplayLayout?.();
 }
 
 // Heal text-node fragmentation in each paragraph as the caret leaves it:
@@ -1614,11 +1675,10 @@ document.addEventListener('selectionchange', () => {
   }
 });
 
-// Reduce pasted HTML to what a manuscript is made of: paragraphs, bold, italic.
+// Reduce pasted HTML to screenplay paragraphs and supported inline formatting.
 function cleanPasteHtml(html) {
   const holder = document.createElement('div');
-  holder.innerHTML = html;
-  holder.querySelectorAll('script,style,meta,link,img,table').forEach((n) => n.remove());
+  holder.innerHTML = sanitizeScreenplayHtml(html);
   let blocks = [...holder.querySelectorAll('p, li, h1, h2, h3, h4, h5, h6')];
   if (!blocks.length) blocks = [holder]; // inline-only clipboard
   const out = blocks.map((b) => {
@@ -1631,6 +1691,7 @@ function cleanPasteHtml(html) {
           : '';
       }
       let t = escHtml(r.text);
+      if (r.u) t = '<u>' + t + '</u>';
       if (r.i) t = '<i>' + t + '</i>';
       if (r.b) t = '<b>' + t + '</b>';
       return t;
@@ -1723,7 +1784,7 @@ document.addEventListener('keydown', (e) => {
   }
   if (e.key === 'Escape') {
     if (!$('#searchbar').hidden) closeSearch();
-    else window.neo.fullscreenEscape().then((exited) => { if (!exited) backToShelf(); });
+    else window.neo.fullscreenEscape();
   }
 });
 
@@ -1738,6 +1799,7 @@ document.addEventListener('keydown', (e) => {
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Enter' || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
   if (document.querySelector('.modal-backdrop:not([hidden])')) return;
+  if (document.activeElement?.closest?.('.chapter-body')) return;
   e.preventDefault();
   window.neo.fullscreenToggle();
 });
@@ -1951,7 +2013,7 @@ function renderNav() {
     item.className = 'nav-item' + (chId === currentChapterId ? ' current' : '');
     item.dataset.id = chId;
     item.innerHTML = `<div class="n-row" title="Drag to reorder chapters"><span class="n-label"></span>
-      <span style="display:flex;align-items:center"><span class="n-words">${words.toLocaleString()}</span>${flagged ? '<span class="n-flag" title="Unresolved placeholder"></span>' : ''}</span></div>`;
+      <span style="display:flex;align-items:center"><span class="n-words">${words.toLocaleString()} ${words === 1 ? 'word' : 'words'}</span>${flagged ? '<span class="n-flag" title="Unresolved placeholder"></span>' : ''}</span></div>`;
     item.querySelector('.n-label').textContent = book.chapterOrder.length === 1
       ? (book.title || 'The story')
       : (chTitle ? `${i + 1} · ${chTitle}` : `Chapter ${i + 1}`);
@@ -2002,6 +2064,27 @@ $('#nav-add').onclick = () => {
 
 // drop target for chapter reordering, with a gold line showing the landing spot
 const navList = $('#nav-list');
+// Keep the scene list at the width the writer chose.
+const navPane = $('#nav-pane');
+const navResizer = $('#nav-resizer');
+const savedNavWidth = Number(localStorage.getItem('scriptwriter-scenes-width'));
+if (Number.isFinite(savedNavWidth) && savedNavWidth >= 190 && savedNavWidth <= 520) {
+  navPane.style.setProperty('--nav-width', `${savedNavWidth}px`);
+}
+navResizer.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  navResizer.setPointerCapture(e.pointerId);
+  navResizer.classList.add('dragging');
+});
+navResizer.addEventListener('pointermove', (e) => {
+  if (!navResizer.hasPointerCapture(e.pointerId)) return;
+  const width = Math.max(190, Math.min(520, e.clientX));
+  navPane.style.setProperty('--nav-width', `${width}px`);
+  localStorage.setItem('scriptwriter-scenes-width', String(width));
+});
+const stopNavResize = () => navResizer.classList.remove('dragging');
+navResizer.addEventListener('pointerup', stopNavResize);
+navResizer.addEventListener('pointercancel', stopNavResize);
 function navDropInd() {
   let ind = document.querySelector('.nav-drop-ind');
   if (!ind) {
@@ -2070,24 +2153,36 @@ function wireHoverPane(hotzone, pane, isPinnable) {
   hotzone.addEventListener('mouseenter', (e) => {
     if (e.buttons) return; // dragging something — stand down
     pane.classList.add('open');
+    if (pane.id === 'nav-pane') $('#scenes-toggle').setAttribute('aria-expanded', 'true');
+    if (pane.id === 'side-pane') $('.tab.darlings').setAttribute('aria-expanded', 'true');
   });
   hotzone.addEventListener('mouseleave', (e) => {
     if (pinned()) return;
     if (e.relatedTarget && pane.contains(e.relatedTarget)) return;
     pane.classList.remove('open');
+    if (pane.id === 'nav-pane') $('#scenes-toggle').setAttribute('aria-expanded', 'false');
+    if (pane.id === 'side-pane') $('.tab.darlings').setAttribute('aria-expanded', 'false');
   });
   pane.addEventListener('mouseleave', () => {
     if (pinned()) return;
     pane.classList.remove('open');
+    if (pane.id === 'nav-pane') $('#scenes-toggle').setAttribute('aria-expanded', 'false');
+    if (pane.id === 'side-pane') $('.tab.darlings').setAttribute('aria-expanded', 'false');
   });
 }
-wireHoverPane($('#nav-hotzone'), $('#nav-pane'), false);
+wireHoverPane($('#nav-hotzone'), $('#nav-pane'), true);
 wireHoverPane($('#side-hotzone'), $('#side-pane'), true);
 
 // leaving the window closes unpinned panes (they used to stick open)
 function closeUnpinnedPanes() {
-  $('#nav-pane').classList.remove('open');
-  if ($('#side-pane').dataset.pinned !== '1') $('#side-pane').classList.remove('open');
+  if ($('#nav-pane').dataset.pinned !== '1') {
+    $('#nav-pane').classList.remove('open');
+    $('#scenes-toggle').setAttribute('aria-expanded', 'false');
+  }
+  if ($('#side-pane').dataset.pinned !== '1') {
+    $('#side-pane').classList.remove('open');
+    $('.tab.darlings').setAttribute('aria-expanded', 'false');
+  }
 }
 document.documentElement.addEventListener('mouseleave', closeUnpinnedPanes);
 window.addEventListener('blur', closeUnpinnedPanes);
@@ -2102,21 +2197,117 @@ $('#editor-view').addEventListener('wheel', (e) => {
   scroller.scrollTop += e.deltaY;
 }, { passive: true });
 
-$('#side-pin').onclick = () => {
+function closeDarlingsPanel() {
   const pane = $('#side-pane');
-  const pinned = pane.dataset.pinned === '1';
-  pane.dataset.pinned = pinned ? '0' : '1';
-  $('#side-pin').classList.toggle('pinned', !pinned);
-  $('#editor-view').classList.toggle('side-pinned', !pinned);
-  if (!pinned) pane.classList.add('open');
+  pane.classList.remove('open', 'drag-target');
+  pane.dataset.pinned = '0';
+  const pinButton = $('#side-pin');
+  pinButton.classList.remove('pinned');
+  pinButton.setAttribute('aria-pressed', 'false');
+  pinButton.textContent = 'Keep open';
+  pinButton.title = 'Keep Darlings panel open';
+  $('.tab.darlings').setAttribute('aria-expanded', 'false');
+  $('#editor-view').classList.remove('side-pinned');
+}
+function closeScenesPanel() {
+  $('#nav-pane').classList.remove('open');
+  $('#nav-pane').dataset.pinned = '0';
+  $('#scenes-toggle').setAttribute('aria-expanded', 'false');
+}
+function openScenesPanel() {
+  closeDarlingsPanel();
+  $('#edit-panel').hidden = true;
+  $('#edit-toggle').setAttribute('aria-expanded', 'false');
+  $('#nav-pane').classList.add('open');
+  $('#nav-pane').dataset.pinned = '1';
+  $('#scenes-toggle').setAttribute('aria-expanded', 'true');
+}
+$('#scenes-toggle').onclick = () => {
+  if ($('#nav-pane').dataset.pinned === '1') closeScenesPanel();
+  else openScenesPanel();
 };
+$('#nav-close').onclick = closeScenesPanel;
+function openDarlingsPanel() {
+  const pane = $('#side-pane');
+  closeScenesPanel();
+  $('#edit-panel').hidden = true;
+  $('#edit-toggle').setAttribute('aria-expanded', 'false');
+  renderDarlings();
+  pane.classList.add('open');
+  pane.dataset.pinned = '1';
+  const pinButton = $('#side-pin');
+  pinButton.classList.add('pinned');
+  pinButton.setAttribute('aria-pressed', 'true');
+  pinButton.textContent = 'Auto hide';
+  pinButton.title = 'Let Darlings panel close automatically';
+  $('.tab.darlings').setAttribute('aria-expanded', 'true');
+  $('#editor-view').classList.add('side-pinned');
+}
+$('#side-pin').onclick = () => {
+  if ($('#side-pane').dataset.pinned === '1') {
+    $('#side-pane').dataset.pinned = '0';
+    $('#side-pin').classList.remove('pinned');
+    $('#side-pin').setAttribute('aria-pressed', 'false');
+    $('#side-pin').textContent = 'Keep open';
+    $('#side-pin').title = 'Keep Darlings panel open';
+    $('#editor-view').classList.remove('side-pinned');
+  } else openDarlingsPanel();
+};
+$('#side-close').onclick = closeDarlingsPanel;
+$('#export-pdf').onclick = () => doExport('pdf').catch(error => toast('Could not save PDF: ' + error.message, 10000));
+
+// The page is the default workspace. Reaching the bottom edge deliberately
+// reveals management controls; returning to the page puts them away.
+const bottomHotzone = $('#bottom-hotzone');
+const bottomBar = $('#bottombar');
+bottomBar.inert = true;
+let controlsHideTimer;
+const revealControls = () => {
+  clearTimeout(controlsHideTimer);
+  bottomBar.inert = false;
+  $('#editor-view').classList.add('controls-visible');
+};
+const hideControls = () => {
+  clearTimeout(controlsHideTimer);
+  if (bottomBar.contains(document.activeElement)) document.activeElement.blur();
+  bottomBar.inert = true;
+  $('#editor-view').classList.remove('controls-visible');
+};
+const hideControlsAfterLeaving = () => {
+  clearTimeout(controlsHideTimer);
+  controlsHideTimer = setTimeout(() => {
+    const keyboardFocus = bottomBar.contains(document.activeElement) && document.activeElement.matches(':focus-visible');
+    if (!bottomHotzone.matches(':hover') && !bottomBar.matches(':hover') && !keyboardFocus) hideControls();
+  }, 180);
+};
+bottomHotzone.addEventListener('pointermove', revealControls);
+bottomHotzone.addEventListener('pointerleave', hideControlsAfterLeaving);
+bottomHotzone.addEventListener('focus', revealControls);
+bottomHotzone.addEventListener('click', revealControls);
+bottomBar.addEventListener('pointerenter', revealControls);
+bottomBar.addEventListener('pointerleave', hideControlsAfterLeaving);
+window.addEventListener('blur', hideControls);
+$('#paper-scroll').addEventListener('pointerdown', () => {
+  hideControls();
+  $('#edit-panel').hidden = true;
+  $('#edit-toggle').setAttribute('aria-expanded', 'false');
+}, true);
+$('#paper-scroll').addEventListener('keydown', event => {
+  if (!['Control', 'Shift', 'Alt', 'Meta'].includes(event.key)) hideControls();
+}, true);
 
 /* ================================================================== */
 /*  TABS — Manuscript / Notes / Outline / Darlings                     */
 /* ================================================================== */
 
 $$('.tab').forEach((tab) => {
-  tab.addEventListener('click', () => switchTab(tab.dataset.tab));
+  tab.addEventListener('click', () => {
+    if (tab.dataset.tab === 'darlings') {
+      if (currentTab !== 'manuscript') switchTab('manuscript');
+      if ($('#side-pane').dataset.pinned === '1') closeDarlingsPanel();
+      else openDarlingsPanel();
+    } else switchTab(tab.dataset.tab);
+  });
   tab.addEventListener('dblclick', async () => {
     const kind = tab.dataset.tab;
     if (kind !== 'notes' && kind !== 'outline') return;
@@ -2142,11 +2333,19 @@ document.addEventListener('dragstart', (e) => {
   // any text drag inside the manuscript lights up the bottom bar
   if (currentTab === 'manuscript' && e.target.closest && e.target.closest('.chapter-body')) {
     $('#bottombar').classList.add('attn');
+    revealControls();
     const sel = window.getSelection();
     draggedRange = sel.rangeCount && !sel.isCollapsed ? sel.getRangeAt(0).cloneRange() : null;
+    if(draggedRange)$('#editor-view').classList.add('dragging-script');
   }
 });
-document.addEventListener('dragend', () => { $('#bottombar').classList.remove('attn'); draggedRange = null; });
+document.addEventListener('dragend', () => {
+  $('#bottombar').classList.remove('attn');
+  $('#side-pane').classList.remove('drag-target');
+  $('#editor-view').classList.remove('dragging-script');
+  draggedRange = null;
+  hideControlsAfterLeaving();
+});
 
 darlingsTab.addEventListener('dragover', (e) => {
   e.preventDefault();
@@ -2160,7 +2359,37 @@ darlingsTab.addEventListener('drop', async (e) => {
   const html = e.dataTransfer.getData('text/html');
   const text = e.dataTransfer.getData('text/plain');
   await moveSelectionToDarlings(html, text);
+  openDarlingsPanel();
 });
+
+// Let a writer reveal the right edge and drop directly into Darlings without
+// aiming for the small footer tab.
+const sidePane = $('#side-pane');
+const sideHotzone = $('#side-hotzone');
+const acceptDarlingDrag = (e) => {
+  if (!draggedRange) return;
+  e.preventDefault();
+  sidePane.classList.add('open', 'drag-target');
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+};
+sideHotzone.addEventListener('dragover', acceptDarlingDrag);
+sidePane.addEventListener('dragover', acceptDarlingDrag);
+sidePane.addEventListener('dragleave', (e) => {
+  if (!sidePane.contains(e.relatedTarget)) sidePane.classList.remove('drag-target');
+});
+const saveDarlingDrop = async (e) => {
+  if (!draggedRange) return;
+  e.preventDefault();
+  e.stopPropagation();
+  sidePane.classList.remove('drag-target');
+  $('#editor-view').classList.remove('dragging-script');
+  const html = e.dataTransfer.getData('text/html');
+  const text = e.dataTransfer.getData('text/plain');
+  await moveSelectionToDarlings(html, text);
+  openDarlingsPanel();
+};
+sideHotzone.addEventListener('drop', saveDarlingDrop);
+sidePane.addEventListener('drop', saveDarlingDrop);
 
 // ---- text-position helpers: darlings remember home by their surrounding
 // text, so nothing foreign is left inside the manuscript ----
@@ -2340,7 +2569,13 @@ function darlingFromKeyboard() {
 let tabPlaces = {};
 
 function switchTab(name) {
+  if (name === 'darlings') {
+    if (currentTab !== 'manuscript') switchTab('manuscript');
+    openDarlingsPanel();
+    return;
+  }
   const scroller = $('#paper-scroll');
+  if (name !== 'manuscript') closeDarlingsPanel();
   if (book && currentTab && currentTab !== name) {
     tabPlaces[currentTab] = currentTab === 'manuscript'
       ? { caret: captureCaret(), scroll: scroller.scrollTop }
@@ -2352,7 +2587,6 @@ function switchTab(name) {
   const paper = $('#paper');
   const aux = $('#aux-paper');
   const auxEditor = $('#aux-editor');
-  const dList = $('#darlings-list');
   const oList = $('#outline-list');
   const back = tabPlaces[name];
   const returnTo = () => { if (back && typeof back.scroll === 'number') scroller.scrollTop = back.scroll; };
@@ -2365,20 +2599,15 @@ function switchTab(name) {
     aux.hidden = true;
     if (back && back.caret) restoreCaret(back.caret); // brings the scroll along
     else returnTo();
+    window.scheduleScreenplayLayout?.();
     return;
   }
   paper.hidden = true;
   aux.hidden = false;
   auxEditor.hidden = true;
-  dList.hidden = true;
   oList.hidden = true;
 
-  if (name === 'darlings') {
-    $('#aux-title').textContent = 'Darlings';
-    dList.hidden = false;
-    renderDarlings();
-    returnTo();
-  } else if (name === 'outline') {
+  if (name === 'outline') {
     $('#aux-title').textContent = book.tabNames.outline;
     oList.hidden = false;
     if (book.chapterOrder.length === 0) createChapterAt(0);
@@ -2389,7 +2618,7 @@ function switchTab(name) {
     auxEditor.hidden = false;
     auxEditor.dataset.kind = name;
     window.neo.readAux(book.id, name).then((html) => {
-      auxEditor.innerHTML = html || '';
+      auxEditor.innerHTML = sanitizeScreenplayHtml(html);
       auxEditor.focus({ preventScroll: true });
       returnTo();
     });
@@ -2664,95 +2893,17 @@ function flushAux() {
   auxDirty = false;
 }
 
-function renderDarlings() {
-  const wrap = $('#darlings-list');
-  wrap.innerHTML = '';
-  if (darlings.length === 0) {
-    wrap.innerHTML = `<div class="darlings-empty">When a beautiful paragraph is gumming up the works, select it and drag it onto the Darlings tab below.<br>It leaves your manuscript but it is never lost.</div>`;
-    return;
-  }
-  for (const d of darlings) {
-    const el = document.createElement('div');
-    el.className = 'darling';
-    const content = document.createElement('div');
-    if (d.html) content.innerHTML = d.html;
-    else content.textContent = d.text;
-    const meta = document.createElement('div');
-    meta.className = 'd-meta';
-    const when = new Date(d.date).toLocaleDateString();
-    meta.innerHTML = `<span>from ${d.chapterLabel} · ${when} · ${countWords(d.text).toLocaleString()} words</span>
-      <span><button class="d-restore">Restore</button> <button class="d-del">Delete forever</button></span>`;
-    meta.querySelector('.d-restore').onclick = () => restoreDarling(d.id);
-    meta.querySelector('.d-del').onclick = async () => {
-      snapshotStructure('darling delete');
-      // tidy up the invisible anchor the darling left behind
-      const anchor = document.querySelector(`.darling-anchor[data-did="${d.id}"]`);
-      if (anchor) {
-        const body = anchor.closest('.chapter-body');
-        const chId = anchor.closest('.chapter').dataset.id;
-        anchor.remove();
-        syncChapter(body, chId);
-      }
-      darlings = darlings.filter((x) => x.id !== d.id);
-      await window.neo.writeJSON(book.id, 'darlings', darlings);
-      renderDarlings();
-    };
-    el.appendChild(content);
-    el.appendChild(meta);
-    wrap.appendChild(el);
-  }
-}
+// Screenplay mode supplies the single Darlings panel renderer.
+function renderDarlings() {}
 
-async function restoreDarling(id) {
-  const d = darlings.find((x) => x.id === id);
-  if (!d) return;
-  snapshotStructure('darling restore');
-  switchTab('manuscript');
-
-  // Preferred: put it back in the exact spot it was cut from, located by
-  // the remembered text surrounding the cut point
-  if (d.chapterId && book.chapterOrder.includes(d.chapterId)) {
-    const body = document.querySelector(`.chapter[data-id="${d.chapterId}"] .chapter-body`);
-    const pos = body ? findDarlingPosition(body, d) : -1;
-    if (body && pos !== -1) {
-      const at = textPosToRange(body, pos);
-      if (at) {
-        let scrollTo = at.startContainer.parentElement?.closest?.('p') || body;
-        if (d.html && /<p[\s>]/i.test(d.html)) {
-          // block content: paragraphs go back in after the host paragraph
-          const holder = document.createElement('div');
-          holder.innerHTML = d.html;
-          let ref = scrollTo === body ? body.lastElementChild : scrollTo;
-          scrollTo = holder.firstElementChild || scrollTo;
-          for (const n of [...holder.childNodes]) { ref.after(n); ref = n; }
-        } else {
-          // inline content: slot it right where the caret was
-          at.insertNode(document.createRange().createContextualFragment(d.html || d.text));
-        }
-        syncChapter(body, d.chapterId);
-        darlings = darlings.filter((x) => x.id !== id);
-        await window.neo.writeJSON(book.id, 'darlings', darlings);
-        scrollTo.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        toast('Darling restored to its original spot');
-        return;
-      }
-    }
-  }
-
-  // Fallback: the spot no longer exists — end of its chapter (or the last one)
-  let chId = d.chapterId && book.chapterOrder.includes(d.chapterId)
-    ? d.chapterId
-    : book.chapterOrder[book.chapterOrder.length - 1];
-  if (!chId) { newChapter(); chId = book.chapterOrder[0]; }
-  const body = document.querySelector(`.chapter[data-id="${chId}"] .chapter-body`);
-  const frag = d.html ? d.html : '<p>' + d.text.replace(/\n+/g, '</p><p>') + '</p>';
-  body.insertAdjacentHTML('beforeend', frag);
-  chapterHTML[chId] = captureBody(body);
-  scheduleChapterSave(chId);
-  darlings = darlings.filter((x) => x.id !== id);
+async function deleteDarling(id) {
+  if (!darlings.some((entry) => entry.id === id)) return;
+  const answer = await optionModal('Delete this Darling?', 'This saved passage will be removed. The script stays as it is.', [{ label: 'Delete Darling', value: 'delete', danger: true }]);
+  if (answer !== 'delete') return;
+  snapshotStructure('darling delete');
+  darlings = darlings.filter((entry) => entry.id !== id);
   await window.neo.writeJSON(book.id, 'darlings', darlings);
-  focusChapter(chId);
-  toast('Original spot is gone — restored to the end of ' + (d.chapterLabel || 'the manuscript'));
+  renderDarlings();
 }
 
 /* ================================================================== */
@@ -3224,6 +3375,7 @@ function replaceCurrent() {
   const oldIdx = searchState.idx;
   runSearch();
   if (searchState.matches.length) gotoMatch(Math.min(oldIdx, searchState.matches.length - 1));
+  window.scheduleScreenplayLayout?.();
 }
 
 // Every chapter, front to back
@@ -3253,6 +3405,7 @@ function replaceAllMatches() {
   if (n === 0) undoStack.pop(); // nothing changed, nothing to undo
   toast(n ? `${n} replaced across the whole book — ${KZ} to undo` : '0 replaced');
   runSearch();
+  window.scheduleScreenplayLayout?.();
 }
 
 $('#search-input').addEventListener('input', () => {
@@ -3290,7 +3443,7 @@ $('#search-close').onclick = closeSearch;
 /*  IMPORT                                                             */
 /* ================================================================== */
 
-const escHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const escHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
 // Turn parsed manuscripts into books on a shelf — used by the file picker
 // and by dropping files from Finder straight onto a shelf.
@@ -3419,23 +3572,243 @@ function scanSpellingHere() {
   }
 }
 
+// An explicit spell check checks the screenplay, rather than only the scene
+// holding the caret. Lazy scans still handle normal writing.
+async function scanAllSpelling() {
+  if (!spellOn) return;
+  const jobs = [];
+  if (currentTab === 'manuscript') {
+    for (const chapter of document.querySelectorAll('.chapter')) {
+      const body = chapter.querySelector('.chapter-body');
+      if (body) jobs.push(spellScanEl(body, chapter.dataset.id));
+    }
+  } else {
+    jobs.push(spellScanEl($('#aux-editor'), 'aux-' + ($('#aux-editor').dataset.kind || 'notes')));
+  }
+  await Promise.all(jobs);
+}
+
 function scheduleSpellRescan(key, el) {
   clearTimeout(saveTimers['sp-' + key]);
   saveTimers['sp-' + key] = setTimeout(() => { if (spellOn) spellScanEl(el, key); }, 600);
 }
 
-function toggleSpellcheck() {
+async function toggleSpellcheck() {
   spellOn = !spellOn;
+  const spellButton = document.querySelector('#edit-spellcheck');
+  if (spellButton) {
+    spellButton.textContent = spellOn ? 'Hide spelling highlights' : 'Highlight spelling';
+    spellButton.setAttribute('aria-pressed', String(spellOn));
+  }
   if (spellOn) {
     spellScanned = new Set();
     spellRanges = new Map();
-    scanSpellingHere();
+    toast('Checking spelling…');
+    await scanAllSpelling();
+    if (spellOn) {
+      const count = [...spellRanges.values()].reduce((total, ranges) => total + ranges.length, 0);
+      toast(count ? `${count} possible spelling ${count === 1 ? 'mistake' : 'mistakes'} highlighted` : 'No spelling issues found');
+    }
   } else {
     CSS.highlights.delete('neo-spell');
     spellRanges = new Map();
     document.querySelector('.spell-menu')?.remove();
+    toast('Spellcheck off');
   }
-  toast(spellOn ? 'Spellcheck on' : 'Spellcheck off');
+}
+
+// Review spelling in the context of the screenplay. The modal exists before
+// scanning begins, so Stop review and Escape always have somewhere to land.
+let activeSpellReview = null;
+async function startSpellReview() {
+  activeSpellReview?.close();
+  const makeElement = (tag, text = '', className = '') => {
+    const node = document.createElement(tag);
+    node.textContent = text;
+    if (className) node.className = className;
+    return node;
+  };
+  const previousFocus = document.activeElement;
+  const backdrop = makeElement('div', '', 'modal-backdrop spell-review');
+  const modal = makeElement('section', '', 'modal spell-review-dialog');
+  modal.setAttribute('role', 'dialog');
+  modal.setAttribute('aria-modal', 'true');
+  modal.setAttribute('aria-labelledby', 'spell-review-title');
+  const header = makeElement('div', '', 'spell-review-header');
+  const title = makeElement('h2', 'Spelling', 'spell-review-title');
+  title.id = 'spell-review-title';
+  const closeButton = makeElement('button', '×', 'spell-review-close');
+  closeButton.type = 'button';
+  closeButton.setAttribute('aria-label', 'Close spelling review');
+  header.append(title, closeButton);
+  const content = makeElement('div', '', 'spell-review-content');
+  const footer = makeElement('div', '', 'spell-review-footer');
+  const stopButton = makeElement('button', 'Stop review', 'spell-review-stop');
+  stopButton.type = 'button';
+  footer.append(stopButton);
+  modal.append(header, content, footer);
+  backdrop.append(modal);
+  document.body.append(backdrop);
+  let closed = false;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    document.removeEventListener('keydown', onReviewKey, true);
+    backdrop.remove();
+    if (activeSpellReview?.close === close) activeSpellReview = null;
+    if (previousFocus?.isConnected) previousFocus.focus();
+  };
+  activeSpellReview = { close };
+  closeButton.onclick = close;
+  stopButton.onclick = close;
+  backdrop.addEventListener('mousedown', event => { if (event.target === backdrop) close(); });
+  const onReviewKey = event => {
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); return; }
+    if (event.key !== 'Tab') return;
+    const controls = [...modal.querySelectorAll('button:not([disabled]), input:not([disabled])')];
+    if (!controls.length) return;
+    if (event.shiftKey && document.activeElement === controls[0]) { event.preventDefault(); controls.at(-1).focus(); }
+    else if (!event.shiftKey && document.activeElement === controls.at(-1)) { event.preventDefault(); controls[0].focus(); }
+  };
+  document.addEventListener('keydown', onReviewKey, true);
+  closeButton.focus();
+  const showStatus = message => {
+    content.replaceChildren(makeElement('p', message, 'spell-review-status'));
+    if (!modal.contains(document.activeElement)) closeButton.focus();
+  };
+  const showFailure = error => {
+    window.neo.logError('Spell review: ' + (error?.stack || error));
+    if (!closed) showStatus('Could not check this word. You can stop the review and keep writing.');
+  };
+  const contextFor = range => {
+    const start = range.startContainer.nodeType === Node.TEXT_NODE ? range.startContainer.parentElement : range.startContainer;
+    const block = start.closest('[data-element], #aux-editor');
+    if (!block) return { before: '', word: range.toString(), after: '', scene: '' };
+    const leading = document.createRange();
+    leading.selectNodeContents(block);
+    leading.setEnd(range.startContainer, range.startOffset);
+    const trailing = document.createRange();
+    trailing.selectNodeContents(block);
+    trailing.setStart(range.endContainer, range.endOffset);
+    const before = leading.toString();
+    const after = trailing.toString();
+    const boundaries = [...before.matchAll(/[.!?…][”"')\]]*\s+/g)];
+    const last = boundaries.at(-1);
+    let left = last ? before.slice(last.index + last[0].length) : before;
+    const next = after.match(/[.!?…][”"')\]]*(?=\s|$)/);
+    let right = next ? after.slice(0, next.index + next[0].length) : after;
+    const clippedLeft = left.length > 110, clippedRight = right.length > 110;
+    if (clippedLeft) left = '…' + left.slice(-110);
+    if (clippedRight) right = right.slice(0, 110) + '…';
+    const chapter = block.closest('.chapter');
+    const scene = chapter?.querySelector('[data-element="scene-heading"]')?.textContent.trim() ||
+      (block.id === 'aux-editor' ? 'Notes' : 'Screenplay');
+    return { before: left.replace(/\s+/g, ' ').trimStart(), word: range.toString(), after: right.replace(/\s+/g, ' ').trimEnd(), scene };
+  };
+  if (!spellOn) {
+    spellOn = true;
+    spellScanned = new Set();
+    spellRanges = new Map();
+    const spellButton = document.querySelector('#edit-spellcheck');
+    if (spellButton) {
+      spellButton.textContent = 'Hide spelling highlights';
+      spellButton.setAttribute('aria-pressed', 'true');
+    }
+  }
+  showStatus('Checking spelling…');
+  try { await scanAllSpelling(); }
+  catch (error) { showFailure(error); return; }
+  if (closed) return;
+  const skipped = new Set();
+  const issueKey = range => {
+    const block = (range.startContainer.nodeType === Node.TEXT_NODE ? range.startContainer.parentElement : range.startContainer).closest('[data-id]');
+    const chapter = block?.closest('.chapter')?.dataset.id || 'aux';
+    const before = document.createRange();
+    before.selectNodeContents(block || range.commonAncestorContainer);
+    before.setEnd(range.startContainer, range.startOffset);
+    return `${chapter}:${block?.dataset.id || 'text'}:${before.toString().length}:${range.toString().toLowerCase()}`;
+  };
+  const next = async () => {
+    if (closed) return;
+    const issue = [...spellRanges.values()].flat().find(range => range.startContainer.isConnected && !skipped.has(issueKey(range)));
+    if (!issue) { close(); toast('Spelling review complete'); return; }
+    showStatus('Finding suggestions…');
+    const word = spellNorm(issue.toString());
+    const suggestions = await window.neo.spellSuggest(word);
+    if (closed) return;
+    const context = contextFor(issue);
+    const location = makeElement('div', context.scene, 'spell-review-location');
+    const excerpt = makeElement('p', '', 'spell-review-excerpt');
+    const correction = makeElement('input', '', 'spell-review-correction');
+    correction.type = 'text';
+    correction.value = context.word;
+    correction.spellcheck = false;
+    correction.setAttribute('aria-label', 'Correct flagged word');
+    const sizeCorrection = () => { correction.size = Math.max(4, Math.min(24, correction.value.length + 1)); };
+    sizeCorrection();
+    correction.addEventListener('input', sizeCorrection);
+    excerpt.append(document.createTextNode(context.before), correction, document.createTextNode(context.after));
+    const heading = makeElement('h3', 'Replace with', 'spell-review-options-title');
+    const choices = makeElement('div', '', 'spell-review-choices');
+    const apply = async replacement => {
+      if (closed) return;
+      try {
+        showStatus('Checking next word…');
+        const editor = issue.startContainer.parentElement?.closest('.chapter-body, #aux-editor');
+        const key = editor?.id === 'aux-editor' ? 'aux-' + (editor.dataset.kind || 'notes') : editor?.closest('.chapter')?.dataset.id;
+        if (!editor || !key) throw new Error('Could not locate the word in the screenplay');
+        editor.focus();
+        const selection = getSelection(); selection.removeAllRanges(); selection.addRange(issue);
+        if (!document.execCommand('insertText', false, replacement)) throw new Error('Could not replace the word');
+        closeButton.focus();
+        await spellScanEl(spellElFor(key), key);
+        await next();
+      } catch (error) { showFailure(error); }
+    };
+    for (const suggestion of suggestions.slice(0, 12)) {
+      const button = makeElement('button', suggestion, 'spell-review-choice');
+      button.type = 'button';
+      button.onclick = () => apply(suggestion);
+      choices.append(button);
+    }
+    if (!choices.childElementCount) choices.append(makeElement('p', 'No suggestions for this word.', 'spell-review-no-options'));
+    const actions = makeElement('div', '', 'spell-review-actions');
+    const replaceTyped = makeElement('button', 'Replace with typed word', 'spell-review-secondary');
+    replaceTyped.type = 'button';
+    const updateTypedAction = () => { replaceTyped.disabled = !correction.value.trim() || correction.value.trim() === context.word; };
+    correction.addEventListener('input', updateTypedAction);
+    updateTypedAction();
+    replaceTyped.onclick = () => apply(correction.value.trim());
+    correction.addEventListener('keydown', event => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (!replaceTyped.disabled) replaceTyped.click();
+    });
+    const skip = makeElement('button', 'Skip and continue', 'spell-review-secondary');
+    skip.type = 'button';
+    skip.onclick = () => { try { skipped.add(issueKey(issue)); next().catch(showFailure); } catch (error) { showFailure(error); } };
+    const add = makeElement('button', 'Add to dictionary', 'spell-review-secondary');
+    add.type = 'button';
+    add.onclick = async () => {
+      if (closed) return;
+      try {
+        showStatus('Checking next word…');
+        library.customWords = library.customWords || [];
+        if (!library.customWords.includes(word)) library.customWords.push(word);
+        await window.neo.writeLibrary(library);
+        await window.neo.spellLearn(word);
+        spellCache.set(word, true);
+        await scanAllSpelling();
+        await next();
+      } catch (error) { showFailure(error); }
+    };
+    actions.append(replaceTyped, skip, add);
+    content.replaceChildren(location, excerpt, heading, choices, actions);
+    correction.focus();
+    correction.select();
+  };
+  next().catch(showFailure);
 }
 
 // right-click a flagged word for suggestions
@@ -3944,7 +4317,7 @@ function safeName(s) {
 // stop at this door.
 function parasFromHtml(html) {
   const holder = document.createElement('div');
-  holder.innerHTML = html || '';
+  holder.innerHTML = sanitizeScreenplayHtml(html);
   // an unwritten outline section is a ghost paragraph plus the scene break
   // NEO planted for it; neither belongs in a book
   holder.querySelectorAll('p.ghost[data-sec-id]').forEach((g) => {
@@ -3958,6 +4331,7 @@ function parasFromHtml(html) {
     const runs = paraRuns(p.innerHTML).filter((r) => r.text);
     const inner = runs.map((r) => {
       let t = escHtml(r.text);
+      if (r.u) t = '<u>' + t + '</u>';
       if (r.i) t = '<i>' + t + '</i>';
       if (r.b) t = '<b>' + t + '</b>';
       return t;
@@ -4100,26 +4474,26 @@ const escXml = (s) => String(s)
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   .replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 
-// Walk a paragraph's DOM and emit [{text, b, i}] so docx/epub get real bold/italic
+// Walk a paragraph's DOM and retain bold, italic, and underline runs.
 function paraRuns(pHtml) {
   const holder = document.createElement('div');
-  holder.innerHTML = pHtml;
+  holder.innerHTML = sanitizeScreenplayHtml(pHtml);
   const runs = [];
-  const walk = (node, b, i) => {
+  const walk = (node, b, i, u) => {
     for (const child of node.childNodes) {
       if (child.nodeType === Node.TEXT_NODE) {
-        if (child.textContent) runs.push({ text: child.textContent.replace(/\u00a0/g, ' '), b, i });
+        if (child.textContent) runs.push({ text: child.textContent.replace(/\u00a0/g, ' '), b, i, u });
       } else if (child.nodeType === Node.ELEMENT_NODE) {
         if (child.classList && child.classList.contains('ph-mark')) {
           runs.push({ mark: child.dataset.sid || '' });
           continue;
         }
         const tag = child.tagName;
-        walk(child, b || tag === 'B' || tag === 'STRONG', i || tag === 'I' || tag === 'EM');
+        walk(child, b || tag === 'B' || tag === 'STRONG', i || tag === 'I' || tag === 'EM', u || tag === 'U');
       }
     }
   };
-  walk(holder, false, false);
+  walk(holder, false, false, false);
   return runs;
 }
 
@@ -4132,7 +4506,7 @@ function docxP(runs, opts = {}) {
   if (opts.indent) pPr.push('<w:ind w:firstLine="480"/>');
   if (opts.spaceBefore) pPr.push(`<w:spacing w:before="${opts.spaceBefore}" w:line="360" w:lineRule="auto"/>`);
   const rXml = runs.map((r) => {
-    const rPr = (r.b ? '<w:b/>' : '') + (r.i ? '<w:i/>' : '') + (opts.size ? `<w:sz w:val="${opts.size}"/>` : '');
+    const rPr = (r.b ? '<w:b/>' : '') + (r.i ? '<w:i/>' : '') + (r.u ? '<w:u w:val="single"/>' : '') + (opts.size ? `<w:sz w:val="${opts.size}"/>` : '');
     return `<w:r>${rPr ? '<w:rPr>' + rPr + '</w:rPr>' : ''}<w:t xml:space="preserve">${escXml(r.text)}</w:t></w:r>`;
   }).join('');
   return `<w:p><w:pPr>${pPr.join('')}</w:pPr>${rXml}</w:p>`;
@@ -4214,6 +4588,7 @@ function chapterXhtml(ch, d) {
     first = false;
     const inner = paraRuns(p.html).map((r) => {
       let t = escXml(r.text);
+      if (r.u) t = '<u>' + t + '</u>';
       if (r.i) t = '<em>' + t + '</em>';
       if (r.b) t = '<strong>' + t + '</strong>';
       return t;
@@ -4535,7 +4910,7 @@ window.neo.onMenu(async (msg) => {
   if (msg.type === 'emailDraft') doEmailDraft();
   if (msg.type === 'emailSettings') emailSettings();
   if (msg.type === 'find') openSearch();
-  if (msg.type === 'spellcheck') toggleSpellcheck();
+  if (msg.type === 'spellcheck') startSpellReview();
   if (msg.type === 'typewriter') toggleTypewriter();
   if (msg.type === 'import') importBooks();
   if (msg.type === 'stats') openStats();

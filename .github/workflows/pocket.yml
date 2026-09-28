@@ -1,12 +1,7 @@
-# Builds the NEO Pocket Android APK, signed with one stable key so every
-# build installs straight over the previous one — no uninstalling.
-#
-# Runs on every push to main that touches Pocket (or the desktop files it
-# borrows), on pocket-v* tags, and by hand from the Actions tab.
-#
-#   push to main  -> refreshes the rolling "pocket-latest" pre-release; the
-#                    APK link stays the same forever, so bookmark it on the phone
-#   pocket-v* tag -> also publishes a numbered release for that version
+# Legacy upstream NEO Pocket Android workflow, retained for provenance.
+# Automatic push and tag triggers are disabled for the Windows-first
+# ScriptWriter fork. A maintainer can still run this workflow manually.
+# Retained from NEO commit 9d8ba5adbfdaa4d7c1d02a702274d47ae0b46812.
 #
 # Needs two repo secrets (Settings -> Secrets and variables -> Actions):
 #   POCKET_KEYSTORE_BASE64    the keystore file, base64-encoded
@@ -14,20 +9,10 @@
 # Without them the build still runs but falls back to a debug-signed APK,
 # which will NOT install over a properly signed one.
 
-name: Build NEO Pocket
+name: Build NEO Pocket (manual legacy workflow)
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'pocket/**'
-      - 'app.js'
-      - 'covers.js'
-      - 'styles.css'
-      - '.github/workflows/pocket.yml'
-    tags:
-      - 'pocket-v*'
-  workflow_dispatch: {}
+  workflow_dispatch:
 
 permissions:
   contents: write

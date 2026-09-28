@@ -1,0 +1,368 @@
+/* ScriptWriter keeps Neo's quiet dark workspace and gives the manuscript a
+   conventional, fixed-width screenplay page. */
+:root {
+  --screenplay-font: "Courier Prime", "Courier New", Courier, monospace;
+  --screenplay-size: 12pt;
+  --screenplay-page-width: 794px;
+  --screenplay-page-height: 1123px;
+}
+
+body[data-page-size="letter"] {
+  --screenplay-page-width: 816px;
+  --screenplay-page-height: 1056px;
+}
+body[data-page-size="letter"] .screenplay-page {
+  width: calc(816px * var(--page-zoom, 1));
+  height: calc(1056px * var(--page-zoom, 1));
+  page: screenplay-letter;
+}
+
+/* A simple screenplay library grid; keep the underlying IDs and click hooks. */
+#bookshelf-view { padding: 52px clamp(28px, 7vw, 100px) 80px; }
+#shelf-header { margin: 0 auto 38px; max-width: 1100px; }
+#shelf-header h1 {
+  color: #ddd; font-size: 19px; font-weight: 400; letter-spacing: 1.2px;
+}
+#author-chip { display: none; }
+#add-shelf-btn, #import-btn { display: none !important; }
+.shelf { max-width: 1100px; margin: 0 auto; }
+.shelf-label, .shelf-grip { display: none !important; }
+.shelf-books {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  align-items: stretch; gap: 14px; min-height: 0; padding: 0;
+  border: 0; box-shadow: none;
+}
+.book, .new-book {
+  width: auto; height: 112px; border-radius: 8px; box-shadow: none;
+  transition: border-color .14s ease, background .14s ease;
+}
+.book {
+  color: #ddd; background: #222 !important; border: 1px solid #333;
+  overflow: hidden;
+}
+.book::before, .book::after { display: none !important; }
+.book:hover, .new-book:hover { transform: none; border-color: #555; }
+.book .b-text {
+  position: static; height: 100%; padding: 18px 18px 14px;
+  justify-content: space-between; pointer-events: none;
+}
+.book.has-cover .b-text { display: flex; }
+.book .b-title {
+  display: block; color: #eee; font: 15px/1.4 Georgia, serif;
+  text-align: left; overflow: hidden; max-height: 44px;
+}
+.book .b-author { display: none; }
+.book .b-refresh, .book .b-painting, .book .b-progress { display: none !important; }
+.new-book {
+  min-height: 112px; color: #969186; background: transparent;
+  border: 1px dashed #45433e; font-size: 14px; font-weight: 400;
+  font-family: inherit; cursor: pointer;
+}
+.new-book:hover { color: var(--accent); border-color: var(--accent); }
+.new-book:focus-visible { color: var(--accent); border-color: var(--accent); outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* First run remains compatible with Neo's setup code, with screenplay wording. */
+#fr-pen { display: none; }
+label:has(#fr-pen) { display: none; }
+#fr-sample, #fr-bodyfonts, #fr-dropcaps { display: none !important; }
+#fr-step2 > p { display: none; }
+
+/* Script page geometry: A4 by default, with a per-script Letter variant. */
+#paper-scroll {
+  width: min(calc(var(--screenplay-page-width) + 72px), 100%);
+  bottom: 0;
+}
+#paper {
+  width: max-content; max-width: none; min-width: 100%;
+  margin: 32px auto 100px;
+}
+.screenplay-page,
+.chapter.screenplay-page,
+.chapter.sheet.screenplay-page {
+  width: calc(var(--screenplay-page-width) * var(--page-zoom, 1));
+  min-height: calc(var(--screenplay-page-height) * var(--page-zoom, 1));
+  height: auto; max-width: none; overflow: visible;
+  margin: 0 auto 28px; padding: 1in 1in 0.75in 1.5in;
+  background: #fff; color: #111;
+  box-shadow: 0 4px 28px rgba(0,0,0,.42);
+  font: var(--screenplay-size)/1 var(--screenplay-font);
+}
+.screenplay-page[data-page-size="letter"],
+.chapter.screenplay-page[data-page-size="letter"] {
+  width: calc(816px * var(--page-zoom, 1));
+  min-height: calc(1056px * var(--page-zoom, 1));
+  height: auto;
+  page: screenplay-letter;
+}
+body.night .screenplay-page,
+body.night .chapter.screenplay-page { background: #fff; color: #111; }
+.screenplay-page * { font-family: inherit; }
+.screenplay-element,
+.screenplay-page [data-element] {
+  min-height: 1em; margin-top: 0; margin-bottom: 0;
+  font: inherit; line-height: 1; white-space: pre-wrap;
+  overflow-wrap: anywhere; outline-color: rgba(201,168,106,.55);
+}
+.screenplay-element[data-element="scene-heading"],
+.screenplay-page [data-element="scene-heading"],
+.sp-heading { margin: 0 0 1em; text-transform: uppercase; }
+.screenplay-element[data-element="action"],
+.screenplay-page [data-element="action"],
+.sp-action { margin: 0 0 1em; }
+.screenplay-element[data-element="character"],
+.screenplay-page [data-element="character"],
+.sp-character { margin: 1em 0 0 2.2in; text-transform: uppercase; }
+.screenplay-element[data-element="dialogue"],
+.screenplay-page [data-element="dialogue"],
+.sp-dialogue { margin: 0 0 1em 1in; max-width: 3.5in; }
+.screenplay-element[data-element="parenthetical"],
+.screenplay-page [data-element="parenthetical"],
+.sp-parenthetical { margin: 0 0 0 1.5in; max-width: 2.5in; }
+.screenplay-element[data-element="transition"],
+.screenplay-page [data-element="transition"],
+.sp-transition { margin: 1em 0 1em auto; text-align: right; text-transform: uppercase; }
+.screenplay-page [data-element="character-extension"] { text-transform: uppercase; }
+.screenplay-page .chapter-head { display: none !important; }
+.screenplay-page .chapter-body,
+.screenplay-page .sp-scene { min-height: 0; font: inherit; line-height: 1; }
+.screenplay-page .chapter-body p { font: inherit; line-height: 1; text-indent: 0; white-space: pre-wrap; }
+.screenplay-page .chapter-body p:first-of-type { text-indent: 0; }
+.screenplay-page .chapter-body p::first-letter { float: none; font-size: inherit; padding: 0; }
+.screenplay-page .chapter-body p[data-element="scene-heading"],
+.screenplay-page .chapter-body p.sp-heading { margin: 0 0 1em; text-transform: uppercase; }
+.screenplay-page .chapter-body p[data-element="action"],
+.screenplay-page .chapter-body p.sp-action { margin: 0 0 1em; }
+.screenplay-page .chapter-body p[data-element="character"],
+.screenplay-page .chapter-body p.sp-character { margin: 1em 0 0 2.2in; text-transform: uppercase; }
+.screenplay-page .chapter-body p[data-element="dialogue"],
+.screenplay-page .chapter-body p.sp-dialogue { margin: 0 0 1em 1in; max-width: 3.5in; }
+.screenplay-page .chapter-body p[data-element="parenthetical"],
+.screenplay-page .chapter-body p.sp-parenthetical { margin: 0 0 0 1.5in; max-width: 2.5in; }
+.screenplay-page .chapter-body p[data-element="transition"],
+.screenplay-page .chapter-body p.sp-transition { margin: 1em 0 1em auto; text-align: right; text-transform: uppercase; }
+
+/* Hidden edge panels: scenes to the left and Darlings to the right. */
+#nav-hotzone, #side-hotzone { width: 14px; }
+#nav-pane, #side-pane { background: #202020; }
+#nav-hotzone::after, #side-hotzone::after {
+  position: absolute; top: 50%; transform: translateY(-50%); padding: 8px 3px;
+  color: #777269; background: #202020; border: 1px solid #3a3833;
+  font-size: 9px; letter-spacing: 1.4px; line-height: 1; text-transform: uppercase;
+  writing-mode: vertical-rl; pointer-events: none; opacity: 0;
+  transition: color .14s ease, border-color .14s ease, opacity .14s ease;
+}
+#nav-hotzone::after { content: "Scenes"; left: 0; border-left: 0; border-radius: 0 4px 4px 0; }
+#side-hotzone::after { content: "Darlings"; right: 0; border-right: 0; border-radius: 4px 0 0 4px; }
+#nav-hotzone:hover::after, #side-hotzone:hover::after {
+  color: var(--accent); border-color: var(--accent); opacity: 1;
+}
+#editor-view.dragging-script #side-hotzone::after {
+  content: "Drop in Darlings"; color: var(--accent); border-color: var(--accent); opacity: 1;
+}
+#nav-label {
+  display: block; padding: 0 18px 14px; color: #929087;
+  font-size: 11px; letter-spacing: 1.2px; text-transform: uppercase;
+}
+#nav-head { display: flex; align-items: flex-start; justify-content: space-between; }
+#nav-close { margin: -7px 12px 0 0; width: 28px; height: 28px; background: none; border: 1px solid transparent; border-radius: 4px; color: #aaa69d; cursor: pointer; }
+#nav-close:hover, #nav-close:focus-visible { border-color: #5a554b; color: #fff; }
+#side-head span { font-size: 0; }
+#side-head span::after {
+  content: "Darlings"; font-size: 11px; color: inherit;
+}
+.side-darlings-hint { margin: 0 16px 12px; color: #aaa69d; font: 11px/1.45 Arial, sans-serif; }
+#side-pane .darling { margin: 0 12px 10px; padding: 10px; border-color: #494239; background: #292723; color: #ddd; font: 12px/1.45 Arial, sans-serif; }
+#side-pane .darling .d-meta { margin: 7px 0; color: #aaa69d; }
+#side-pane .darling button { color: #e7d1aa; border-color: #74654e; }
+#side-pane .darling-actions { display: flex; gap: 7px; flex-wrap: wrap; }
+#side-pane .darling-actions button { margin: 0; }
+#side-pane .darlings-empty { padding: 18px 16px; color: #aaa69d; text-align: left; font: 12px/1.5 Arial, sans-serif; }
+#side-pane.drag-target::after {
+  content: "Drop to save in Darlings"; position: sticky; display: block;
+  margin: 8px 12px; padding: 18px 12px; border: 1px dashed var(--accent);
+  border-radius: 6px; color: var(--accent); background: #25231f;
+  font-size: 12px; text-align: center; pointer-events: none;
+}
+#side-pin {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 28px; padding: 0 7px; border: 1px solid transparent;
+  border-radius: 4px; cursor: pointer;
+  white-space: nowrap; font: 11px Arial, sans-serif; letter-spacing: 0;
+}
+#side-pin:hover, #side-pin:focus-visible { border-color: #5a554b; color: var(--accent); outline: none; }
+#side-pin.pinned { border-color: rgba(201,168,106,.42); }
+#side-close { background: none; border: 1px solid transparent; border-radius: 4px; color: #aaa69d; cursor: pointer; width: 28px; height: 28px; }
+#side-close:hover, #side-close:focus-visible { border-color: #5a554b; color: #fff; }
+#sp-selection-tools {
+  position: fixed; z-index: 310; display: flex; gap: 4px; padding: 5px;
+  background: #24221e; border: 1px solid #77644a; border-radius: 7px;
+  box-shadow: 0 8px 26px #0009;
+  font: 12px/1.2 Arial, sans-serif;
+}
+#sp-selection-tools[hidden] { display: none; }
+#sp-selection-tools button { padding: 7px 9px; border: 0; border-radius: 4px; background: transparent; color: #eee; cursor: pointer; white-space: nowrap; }
+#sp-selection-tools button:hover, #sp-selection-tools button:focus-visible { background: #494033; color: #fff; outline: none; }
+#sp-selection-tools button:disabled { color: #827e77; cursor: not-allowed; }
+#sp-selection-tools button:last-child { color: #e7c88d; border-left: 1px solid #5a5144; border-radius: 0 4px 4px 0; }
+#sp-darling-placement {
+  position: fixed; left: 50%; bottom: 52px; z-index: 300;
+  transform: translateX(-50%); width: min(600px, calc(100vw - 32px));
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px; border: 1px solid #655337; border-radius: 7px;
+  background: #25231f; color: #eee; box-shadow: 0 8px 24px #0008;
+  font: 12px/1.4 Arial, sans-serif;
+}
+#sp-darling-placement strong { font-weight: 600; }
+#sp-darling-placement span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #bbb; }
+#sp-darling-placement button { flex: none; border: 1px solid #73644c; border-radius: 4px; padding: 5px 9px; background: transparent; color: #eee; cursor: pointer; }
+#sp-darling-placement button:hover { border-color: var(--accent); }
+#nav-add { font-size: 12px; }
+.nav-item { border-left-width: 2px; }
+.nav-item:hover { background: #292929; }
+
+/* Outline is an independent workspace. Keep it distinct from script pages. */
+#aux-paper { width: min(680px, 92%); }
+#aux-paper:has(#outline-list:not([hidden])) { background: transparent; box-shadow: none; }
+.sp-outline-item {
+  display: grid; grid-template-columns: minmax(0,1fr) auto auto;
+  gap: 8px; align-items: start; margin: 10px 0; padding: 14px;
+  background: #232323; border: 1px solid #333; border-radius: 7px;
+  font: 13px/1.5 Georgia, serif;
+}
+.sp-outline-item .sp-o-heading,
+.sp-outline-item .sp-o-notes {
+  grid-column: 1 / -1; width: 100%; border: 1px solid #3a3a3a;
+  border-radius: 5px; padding: 8px 10px; color: #ddd;
+  background: #1b1b1b; font: 13px/1.45 var(--screenplay-font);
+}
+.sp-outline-item .sp-o-notes { min-height: 66px; resize: vertical; }
+.sp-outline-item button, .sp-outline-add {
+  border: 1px solid #45433e; border-radius: 5px; padding: 6px 9px;
+  color: #c8c5bd; background: transparent; font-size: 12px;
+}
+.sp-outline-item button:hover, .sp-outline-add:hover { border-color: var(--accent); color: var(--accent); }
+.sp-outline-item .sp-o-insert { grid-column: 1 / -1; justify-self: end; }
+.sp-picker, #sp-picker {
+  position: fixed; z-index: 320; min-width: 210px; max-width: 340px;
+  padding: 5px; color: #e8e5de; background: #262626;
+  border: 1px solid #41403c; border-radius: 7px;
+  box-shadow: 0 8px 26px rgba(0,0,0,.45);
+}
+.sp-picker button, #sp-picker button {
+  display: block; width: 100%; padding: 7px 10px; border: 0;
+  border-radius: 4px; background: transparent; color: inherit;
+  font-family: inherit; font-size: 13px; line-height: 1.35; text-align: left;
+}
+.sp-picker button:hover, .sp-picker button.active,
+#sp-picker button:hover, #sp-picker button.active { background: #35342f; }
+.sp-picker-label {
+  padding: 6px 9px 4px; color: var(--accent); font-size: 10px;
+  letter-spacing: 1.2px; text-transform: uppercase;
+}
+.sp-picker-query { padding: 2px 9px 6px; color: #eee; font: 13px/1.4 var(--screenplay-font); }
+.sp-picker-choice {
+  padding: 7px 9px; border-radius: 4px; color: #c9c6bd;
+  font: 13px/1.35 var(--screenplay-font); cursor: default;
+}
+.sp-picker-choice.selected { color: #fff; background: #35342f; }
+
+/* Work controls appear only when the writer reaches the bottom edge. */
+#goal-counter { display: none !important; }
+.tab[data-tab="notes"] { display: none !important; }
+#back-to-shelf { font-size: 0; }
+#back-to-shelf::after { content: "Library"; font-size: 12px; }
+
+/* Quiet Edit tools, opened on demand from the footer. */
+#edit-toggle {
+  padding: 5px 10px; color: var(--muted); background: transparent;
+  border: 1px solid #343434; border-radius: 5px; font-size: 12px;
+}
+#edit-toggle:hover, #edit-toggle[aria-expanded="true"] { color: var(--accent); border-color: #514a3b; }
+#edit-panel {
+  position: fixed; left: 16px; bottom: 50px; z-index: 180;
+  width: min(300px, calc(100vw - 32px)); max-height: min(78vh, 680px);
+  overflow-y: auto; padding: 14px; color: #ddd; background: #202020;
+  border: 1px solid #383838; border-radius: 8px;
+  box-shadow: 0 8px 28px rgba(0,0,0,.42);
+}
+#edit-panel[hidden] { display: none; }
+#edit-panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; color: #bbb; font-size: 11px; letter-spacing: 1.3px; text-transform: uppercase; }
+#edit-panel button, #edit-panel select, #edit-panel input {
+  min-width: 0; padding: 7px 9px; color: #ccc; background: #191919;
+  border: 1px solid #393939; border-radius: 5px; font: inherit; font-size: 12px;
+}
+#edit-panel button { cursor: pointer; }
+#edit-panel button:hover { color: var(--accent); border-color: #625943; }
+#edit-panel-head button { padding: 3px 7px; border: 0; background: transparent; }
+.edit-tools-section { display: grid; gap: 7px; padding: 10px 0; border-top: 1px solid #303030; }
+.edit-tools-section h2 { margin: 0 0 2px; color: #85837d; font-size: 10px; font-weight: 500; letter-spacing: 1px; text-transform: uppercase; }
+.edit-format-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+#edit-panel .edit-format-actions button { display: grid; gap: 2px; justify-items: center; padding: 8px 3px; }
+.edit-format-actions small { color: #918b80; font-size: 10px; }
+.edit-tools-section label { margin-top: 3px; color: #777; font-size: 11px; }
+.edit-tools-section select, .edit-tools-section input { width: 100%; }
+.edit-tools-section input::placeholder { color: #666; }
+.edit-panel-hint { margin: 0 0 3px; color: #777; font-size: 11px; line-height: 1.4; }
+.edit-character-actions { display: flex; gap: 7px; }
+.edit-character-actions button { flex: 1; }
+#edit-panel .quiet-danger { color: #b88b83; }
+.modal .writing-setting { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.modal .writing-setting input { display: inline-block; width: auto; margin: 0; accent-color: var(--accent); }
+@media print { #edit-panel { display: none !important; } }
+
+@media print {
+  @page { size: A4 portrait; margin: 0; }
+  @page screenplay-letter { size: Letter portrait; margin: 0; }
+  html, body { width: auto; height: auto; overflow: visible; background: #fff !important; }
+  #dragstrip, #bookshelf-view, #nav-hotzone, #nav-pane, #side-hotzone, #bottom-hotzone,
+  #side-pane, #bottombar, #searchbar, #hint, #aux-paper { display: none !important; }
+  #editor-view, #paper-scroll, #paper, #chapters { position: static; display: block !important; }
+  #paper-scroll, #paper { width: auto; max-width: none; margin: 0; overflow: visible; transform: none; }
+  .screenplay-page, .chapter.screenplay-page {
+    width: 210mm; min-height: 297mm; height: auto; margin: 0; padding: 25.4mm 25.4mm 19mm 38.1mm;
+    box-shadow: none; overflow: visible;
+  }
+  .screenplay-page[data-page-size="letter"],
+  .chapter.screenplay-page[data-page-size="letter"],
+  body[data-page-size="letter"] .screenplay-page {
+    width: 215.9mm; min-height: 279.4mm; height: auto;
+    page: screenplay-letter;
+  }
+  #title-page { display: block !important; page-break-after: always; break-after: page; }
+}
+
+@media (max-width: 760px) {
+  #bookshelf-view { padding: 36px 22px 70px; }
+  .shelf-books { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+}
+
+/* One continuous editable manuscript laid out on physical pages. Scenes do
+   not force page breaks; the existing paragraph nodes retain their caret. */
+#chapters.sp-paginated {
+  position: relative; margin: 0 auto; color: #111;
+  background: repeating-linear-gradient(to bottom, #fff 0, #fff var(--sp-page-height), transparent var(--sp-page-height), transparent var(--sp-stride));
+}
+body.screenplay-mode #paper { zoom: var(--page-zoom, 1); }
+body.screenplay-mode #title-page { display: none !important; }
+@media print { body.screenplay-mode #title-page { display: block !important; } }
+body.screenplay-mode #title-page { width: var(--screenplay-page-width); min-height: var(--screenplay-page-height); }
+body.screenplay-mode[data-page-size="letter"] #title-page { width: 816px; min-height: 1056px; }
+#chapters.sp-paginated .chapter.sheet {
+  display: contents; margin: 0; padding: 0; border: 0; box-shadow: none; background: none;
+}
+#chapters.sp-paginated .chapter-body { display: block; position: static; height: 0; min-height: 0; margin: 0; padding: 0; }
+#chapters.sp-paginated .chapter-head { display: none !important; }
+#chapters .screenplay-element { color: #111; font-family: 'Courier New', monospace; }
+body.screenplay-mode.night #chapters .screenplay-element { color: #111 !important; }
+.sp-page-number { position: absolute; right: 96px; pointer-events: none; user-select: none; font: 12pt 'Courier New', monospace; }
+#title-page { font-family: 'Courier New', monospace; background: #fff; color: #111; }
+#tp-subtitle { display: none; }
+#tp-title { font: 12pt/24px 'Courier New', monospace; text-transform: uppercase; }
+#tp-author { font: 12pt/24px 'Courier New', monospace; color: #111 !important; letter-spacing: 0; }
+#sp-picker .sp-picker-label { padding: 7px 9px; color: #b7aa92; font-size: 11px; }
+#sp-picker .sp-picker-query { padding: 4px 9px; white-space: pre-wrap; }
+#sp-picker .sp-picker-choice { padding: 7px 9px; border-radius: 4px; cursor: pointer; }
+#sp-picker .sp-picker-choice.selected { background: #494235; color: #fff; }
+.sp-outline-item { display: grid; grid-template-columns: 1fr auto auto auto; gap: 8px; margin: 14px 0; }
+.sp-o-heading,.sp-o-notes { grid-column: 1 / -1; padding: 10px; color: #ddd; background: #252525; border: 1px solid #555; }
+.sp-o-notes { min-height: 80px; resize: vertical; }

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="ScriptWriter icon">
+  <rect width="512" height="512" rx="112" fill="#1d1d1b"/>
+  <path d="M146 104h176l44 44v260H146z" fill="#f6f3eb"/>
+  <path d="M322 104v44h44" fill="#d7c8a7"/>
+  <path d="M184 212h144M184 250h144M184 288h106" stroke="#1d1d1b" stroke-width="12" stroke-linecap="round"/>
+  <path d="M184 352h70" stroke="#bb9456" stroke-width="16" stroke-linecap="round"/>
+</svg>

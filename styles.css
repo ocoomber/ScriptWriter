@@ -439,7 +439,7 @@ body.typewriter #paper { margin-bottom: 60vh; }
 /* cap-off while the caret is in the first paragraph: the rule must stop
    MATCHING entirely — a matching first-letter rule, even styled to nothing,
    makes the engine split the text internally, which corrupts deletes */
-.chapter-body:not(.cap-off) p:first-of-type::first-letter {
+.chapter-body:not(.cap-off):not(.screenplay-body) p:first-of-type::first-letter {
   font-size: 3.4em; float: left; line-height: 0.8;
   padding: 4px 8px 0 0; font-family: var(--dropcap-font);
 }
@@ -448,6 +448,74 @@ body.typewriter #paper { margin-bottom: 60vh; }
   text-decoration: underline wavy #cf5c56;
   text-decoration-skip-ink: none;
   background-color: rgba(207, 92, 86, 0.12);
+}
+.spell-review .spell-review-dialog {
+  width: min(560px, calc(100vw - 28px)); max-height: min(86vh, 760px);
+  padding: 0; overflow: hidden; display: flex; flex-direction: column;
+  border-color: #4a4640; box-shadow: 0 20px 60px rgba(0, 0, 0, .55);
+}
+.spell-review-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px 22px 14px; border-bottom: 1px solid #383632;
+}
+.spell-review-header h2 { margin: 0; font-size: 18px; letter-spacing: .2px; }
+.spell-review-close {
+  width: 34px; height: 34px; border: 1px solid #49453e; border-radius: 5px;
+  background: transparent; color: #dedbd4; font: 25px/1 sans-serif; cursor: pointer;
+}
+.spell-review-close:hover, .spell-review-close:focus-visible { border-color: var(--accent); color: var(--accent); }
+.spell-review-content { min-height: 170px; padding: 20px 22px 12px; overflow-y: auto; }
+.spell-review-location {
+  margin-bottom: 10px; color: #aaa499; font-size: 11px;
+  letter-spacing: .7px; text-transform: uppercase;
+}
+.spell-review .spell-review-excerpt {
+  margin: 0 0 23px; padding: 18px 20px; border-left: 4px solid var(--accent);
+  border-radius: 3px; background: #e7e3da; color: #25231f;
+  font: 16px/1.6 var(--screenplay-font, 'Courier New', monospace);
+  overflow-wrap: anywhere;
+}
+.spell-review .spell-review-excerpt .spell-review-correction {
+  display: inline-block; width: auto; max-width: 100%; margin: 0;
+  padding: 0 2px; border: 1px solid #a9342f;
+  border-radius: 2px; background: #f7c9bc; color: #211e1b;
+  font: inherit; text-align: left;
+  text-decoration: underline wavy #a9342f 2px; text-underline-offset: 3px;
+}
+.spell-review .spell-review-excerpt .spell-review-correction:focus { border-color: #a9342f; outline: 2px solid #a9342f; outline-offset: 1px; }
+.spell-review-options-title {
+  margin: 0 0 7px; color: #aaa499; font-size: 11px;
+  font-weight: 600; letter-spacing: .7px; text-transform: uppercase;
+}
+.spell-review-choices { display: grid; gap: 5px; max-height: 230px; overflow-y: auto; }
+.spell-review-choice {
+  width: 100%; min-height: 42px; padding: 9px 14px; text-align: left;
+  border: 1px solid #45413a; border-radius: 5px; background: #292824;
+  color: #f1eee8; font: 15px/1.3 var(--screenplay-font, 'Courier New', monospace);
+  cursor: pointer;
+}
+.spell-review-choice:hover, .spell-review-choice:focus-visible {
+  border-color: var(--accent); background: #343126; outline: none;
+}
+.spell-review .spell-review-no-options { margin: 5px 0 2px; color: #a9a49a; font-size: 13px; }
+.spell-review-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.spell-review-secondary, .spell-review-stop {
+  padding: 9px 12px; border: 1px solid #49453e; border-radius: 5px;
+  background: transparent; color: #d2cdc3; font: 13px/1.3 sans-serif; cursor: pointer;
+}
+.spell-review-secondary:hover, .spell-review-secondary:focus-visible,
+.spell-review-stop:hover, .spell-review-stop:focus-visible {
+  border-color: var(--accent); color: var(--accent); outline: none;
+}
+.spell-review-footer {
+  display: flex; justify-content: flex-end; padding: 12px 22px 17px;
+  border-top: 1px solid #383632;
+}
+.spell-review .spell-review-status { margin: 0; color: #d2cdc3; font-size: 14px; }
+@media (max-width: 520px) {
+  .spell-review-header { padding: 13px 16px; }
+  .spell-review-content { padding: 16px; }
+  .spell-review-footer { padding: 12px 16px; }
 }
 .spell-menu {
   position: fixed; z-index: 300; min-width: 170px;
@@ -543,14 +611,23 @@ body.bright .spell-menu button { color: #eee; }
 .darlings-empty { text-align: center; color: #b9b4a8; font-style: italic; padding: 60px 0; }
 
 /* --- Left nav pane --- */
-#nav-hotzone { position: fixed; left: 0; top: 0; bottom: 40px; width: 18px; z-index: 60; }
+#nav-hotzone { position: fixed; left: 0; top: 0; bottom: 0; width: 18px; z-index: 60; }
 #nav-pane {
-  position: fixed; left: 0; top: 0; bottom: 40px; width: 248px;
+  position: fixed; left: 0; top: 0; bottom: 0; width: var(--nav-width, 248px);
   background: var(--pane); border-right: 1px solid #2c2c2c;
   transform: translateX(-100%); transition: transform 0.18s ease;
   z-index: 70; overflow-y: auto; padding: 40px 0 20px;
 }
 #nav-pane.open { transform: translateX(0); }
+#nav-resizer {
+  position: absolute; z-index: 2; top: 28px; right: 0; bottom: 0; width: 8px;
+  cursor: ew-resize; touch-action: none;
+}
+#nav-resizer::after {
+  content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px;
+  background: transparent; transition: background .12s ease;
+}
+#nav-resizer:hover::after, #nav-resizer.dragging::after { background: var(--accent); }
 .nav-item {
   padding: 9px 18px 10px; cursor: pointer;
   border-left: 3px solid transparent;
@@ -562,9 +639,9 @@ body.bright .spell-menu button { color: #eee; }
   font-size: 13px; color: #aaa;
 }
 .nav-item:hover .n-row, .nav-item.current .n-row { color: #eee; }
-.nav-item .n-words { font-size: 11px; color: #5d5d5d; }
+.nav-item .n-words { font-size: 11px; color: #777; white-space: nowrap; }
 .nav-item .n-label {
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 155px;
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .nav-item .n-row { cursor: grab; }
 .nav-item.dragging { opacity: 0.4; }
@@ -590,9 +667,9 @@ body.bright .spell-menu button { color: #eee; }
 #nav-add:hover { color: var(--accent); border-color: var(--accent); }
 
 /* --- Right side pane --- */
-#side-hotzone { position: fixed; right: 0; top: 0; bottom: 40px; width: 18px; z-index: 60; }
+#side-hotzone { position: fixed; right: 0; top: 0; bottom: 0; width: 18px; z-index: 60; }
 #side-pane {
-  position: fixed; right: 0; top: 0; bottom: 40px; width: 250px;
+  position: fixed; right: 0; top: 0; bottom: 0; width: 250px;
   background: var(--pane); border-left: 1px solid #2c2c2c;
   transform: translateX(100%); transition: transform 0.18s ease;
   z-index: 70; overflow-y: auto; padding: 36px 0 20px;
@@ -626,18 +703,30 @@ body.bright .spell-menu button { color: #eee; }
 .stickies-empty { text-align: center; color: #555; font-size: 12px; padding: 30px 14px; line-height: 1.6; }
 
 /* --- Bottom bar --- */
+#bottom-hotzone {
+  position: fixed; left: 0; right: 0; bottom: 0; height: 8px;
+  z-index: 79; padding: 0; border: 0; background: transparent;
+}
+#bottom-hotzone:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 #bottombar {
   position: fixed; left: 0; right: 0; bottom: 0; height: 40px;
   background: var(--bg); border-top: 1px solid #262626;
   display: flex; align-items: center; padding: 0 14px; gap: 18px;
   z-index: 80;
-  opacity: 0.35; transition: opacity 0.15s ease;
+  transform: translateY(100%); pointer-events: none;
+  transition: transform 0.16s ease;
 }
-#bottombar:hover, #bottombar.attn { opacity: 1; }
+#editor-view.controls-visible #bottombar, #bottombar.attn {
+  transform: translateY(0); pointer-events: auto;
+}
 #back-to-shelf {
   background: none; border: none; color: var(--muted); font-size: 12px;
 }
 #back-to-shelf:hover { color: var(--accent); }
+#scenes-toggle { background: none; border: 0; color: var(--muted); font: 12px Arial, sans-serif; cursor: pointer; }
+#scenes-toggle:hover, #scenes-toggle[aria-expanded="true"] { color: var(--accent); }
+#export-pdf { background: none; border: 1px solid #514a3f; border-radius: 4px; padding: 5px 9px; color: #d6bb88; font: 12px Arial, sans-serif; cursor: pointer; white-space: nowrap; }
+#export-pdf:hover, #export-pdf:focus-visible { border-color: var(--accent); color: #fff; outline: none; }
 #tabs { display: flex; gap: 4px; flex: 1; justify-content: center; }
 .tab {
   padding: 5px 16px; font-size: 12px; color: var(--muted);
@@ -645,7 +734,8 @@ body.bright .spell-menu button { color: #eee; }
 }
 .tab:hover { color: #ddd; }
 .tab.active { color: var(--accent); background: #232323; }
-.tab.darlings { margin-left: 18px; }
+.tab.darlings { margin-left: 18px; background: none; border: 0; font-family: inherit; line-height: inherit; }
+.tab.darlings[aria-expanded="true"] { color: var(--accent); background: #232323; }
 .tab.drag-over { background: var(--accent); color: var(--bg); }
 #counters { display: flex; gap: 18px; font-size: 12px; color: var(--muted); }
 #counters span { cursor: pointer; user-select: none; }
@@ -723,7 +813,7 @@ body.bright .spell-menu button { color: #eee; }
 
 /* --- Brighter interface (View menu) — the quiet default, turned up --- */
 body.bright { --muted: #b4b4b4; }
-body.bright #bottombar { opacity: 0.92; }
+body.bright #bottombar { opacity: 1; }
 body.bright .tab { color: #b4b4b4; }
 body.bright .nav-item .n-row { color: #ccc; }
 body.bright .nav-item .n-words { color: #8f8f8f; }

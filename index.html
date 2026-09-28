@@ -2,8 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>NEO</title>
+  <title>ScriptWriter</title>
   <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="screenplay.css" />
 </head>
 <body>
   <!-- Draggable strip so the frameless window can be moved -->
@@ -12,10 +13,10 @@
   <!-- ======================= BOOKSHELF ======================= -->
   <div id="bookshelf-view">
     <header id="shelf-header">
-      <h1>NEO</h1>
+      <h1>ScriptWriter</h1>
       <div class="shelf-header-right">
         <span id="author-chip" title="Click to change your author name"></span>
-        <button id="import-btn" title="Import .docx, .txt, or .md manuscripts">&#8681; Import</button>
+        <button id="import-btn" title="Import manuscripts" hidden>&#8681; Import</button>
         <button id="add-shelf-btn" title="Add a shelf">+ Shelf</button>
       </div>
     </header>
@@ -26,8 +27,8 @@
   <div id="firstrun" class="modal-backdrop" hidden>
     <div class="modal">
       <div id="fr-step1">
-        <h2>Welcome to NEO</h2>
-        <p>NEO knows you're writing books. A few quick questions and it will never ask anything again.</p>
+        <h2>Welcome to ScriptWriter</h2>
+        <p>A quiet place to write screenplays. A few quick choices, then your script is ready.</p>
         <label>Your name <span class="soft">(appears as the author on every document — leave blank for “Anonymous”)</span>
           <input id="fr-name" type="text" autocomplete="off" spellcheck="false" />
         </label>
@@ -35,15 +36,15 @@
           <input id="fr-pen" type="text" autocomplete="off" spellcheck="false" />
         </label>
         <div class="fr-style">
-          <p>Are you a pantser or a plotter?</p>
+          <p>How do you like to begin?</p>
           <div class="fr-choices">
             <button class="fr-choice" data-style="pantser">
-              <strong>Pantser</strong>
-              <span>I write by the seat of my pants. New books open on a blank page.</span>
+              <strong>Blank start</strong>
+              <span>Start with a blank screenplay.</span>
             </button>
             <button class="fr-choice" data-style="plotter">
-              <strong>Plotter</strong>
-              <span>I outline first. New books open in the Outline tab.</span>
+              <strong>Outline start</strong>
+              <span>Start with the independent Outline.</span>
             </button>
           </div>
         </div>
@@ -71,48 +72,56 @@
     <!-- Left hover zone: chapter navigation -->
     <div id="nav-hotzone"></div>
     <nav id="nav-pane">
+      <div id="nav-head"><div id="nav-label">Scenes</div><button id="nav-close" type="button" aria-label="Close Scenes panel" title="Close">&#10005;</button></div>
       <div id="nav-list"></div>
-      <button id="nav-add" title="Add a chapter at the end">+ Chapter</button>
+      <button id="nav-add" title="Add a scene at the end">+ Scene</button>
+      <div id="nav-resizer" role="separator" aria-orientation="vertical" aria-label="Resize scenes panel" title="Drag to resize"></div>
     </nav>
 
-    <!-- Right hover zone: notes & comments -->
+    <!-- Right hover zone: saved script passages -->
     <div id="side-hotzone"></div>
-    <aside id="side-pane">
+    <aside id="side-pane" aria-label="Darlings quick panel">
       <div id="side-head">
-        <span>Notes &amp; Comments</span>
-        <button id="side-pin" title="Keep this pane open">&#9737;</button>
+          <span>Darlings</span>
+        <button id="side-pin" type="button" aria-pressed="false" title="Keep Darlings panel open">Keep open</button>
+        <button id="side-close" type="button" aria-label="Close Darlings panel" title="Close">&#10005;</button>
       </div>
+      <p class="side-darlings-hint">Drag selected script here to save it. Choose Place in script to use it again.</p>
       <div id="sticky-list"></div>
     </aside>
 
     <!-- The manuscript -->
     <main id="paper-scroll">
       <div id="paper">
-        <div id="title-page" class="sheet">
+          <div id="title-page" class="sheet screenplay-page">
           <div id="tp-title" contenteditable="true" spellcheck="false" data-ph="Untitled"></div>
           <div id="tp-subtitle" contenteditable="true" spellcheck="false" data-ph="Subtitle (optional)"></div>
           <div id="tp-author" contenteditable="true" spellcheck="false" data-ph="Author"></div>
         </div>
         <div id="chapters"></div>
       </div>
-      <!-- Notes / Outline / Darlings live on the same paper, swapped in -->
+      <!-- Notes and Outline use this alternate workspace; Darlings stays beside the script. -->
       <div id="aux-paper" hidden>
         <h2 id="aux-title"></h2>
         <div id="aux-editor" contenteditable="true" spellcheck="false"></div>
         <div id="outline-list" hidden></div>
-        <div id="darlings-list" hidden></div>
       </div>
     </main>
 
-    <!-- Bottom bar: tabs + counters -->
+    <!-- Invisible edge target reveals the work controls only when requested. -->
+    <button id="bottom-hotzone" type="button" aria-label="Show work controls"></button>
+    <!-- Work controls stay out of the writing view. -->
     <footer id="bottombar">
-      <button id="back-to-shelf" title="Back to your bookshelf">&#8676; Shelf</button>
+      <button id="back-to-shelf" title="Back to your screenplay library">&#8676; Library</button>
+      <button id="scenes-toggle" type="button" aria-controls="nav-pane" aria-expanded="false" title="Show the scene list">Scenes</button>
+      <button id="edit-toggle" aria-controls="edit-panel" aria-expanded="false" title="Writing and project tools">Tools</button>
       <div id="tabs">
-        <div class="tab active" data-tab="manuscript">Manuscript</div>
+        <div class="tab active" data-tab="manuscript">Script</div>
         <div class="tab" data-tab="notes">Notes</div>
         <div class="tab" data-tab="outline">Outline</div>
-        <div class="tab darlings" data-tab="darlings" title="Drag any selection here. It's saved, not gone.">Darlings</div>
+        <button class="tab darlings" data-tab="darlings" type="button" aria-controls="side-pane" aria-expanded="false" title="Open Darlings beside the script, or drop selected script here">Darlings</button>
       </div>
+      <button id="export-pdf" type="button" title="Save a PDF of this screenplay">Save PDF</button>
       <div id="counters">
         <span id="goal-counter" title="Today's words — click for goals, sprints, and your progress chart"></span>
         <span id="pos-counter"></span>
@@ -120,6 +129,62 @@
         <span id="zoom-control" title="Scroll to zoom, or pinch / Ctrl+Scroll anywhere on the page"><button id="zoom-out" title="Zoom out">&#8722;</button><span id="zoom-level" title="Click to reset to 100%">100%</span><button id="zoom-in" title="Zoom in">+</button></span>
       </div>
     </footer>
+
+    <!-- Writing and project tools stay out of the way until requested. -->
+    <aside id="edit-panel" aria-label="Writing and project tools" hidden>
+      <div id="edit-panel-head">
+        <span>Tools</span>
+        <button id="edit-close" type="button" aria-label="Close Edit panel" title="Close">&#10005;</button>
+      </div>
+      <section class="edit-tools-section" aria-labelledby="edit-text-heading">
+        <h2 id="edit-text-heading">Selected script text</h2>
+        <div class="edit-format-actions" role="group" aria-label="Text formatting">
+          <button id="edit-bold" type="button" title="Bold selected text (Ctrl+B)"><span>Bold</span><small>Ctrl+B</small></button>
+          <button id="edit-italic" type="button" title="Italic selected text (Ctrl+I)"><span>Italic</span><small>Ctrl+I</small></button>
+          <button id="edit-underline" type="button" title="Underline selected text (Ctrl+U)"><span>Underline</span><small>Ctrl+U</small></button>
+        </div>
+        <button id="edit-uppercase" type="button">ALL CAPS SELECTED TEXT</button>
+        <button id="edit-normalize-case" type="button">Fix accidental Caps Lock</button>
+        <button id="edit-to-darlings" type="button">Move to Darlings</button>
+      </section>
+      <section class="edit-tools-section" aria-labelledby="edit-tools-heading">
+        <h2 id="edit-tools-heading">Tools</h2>
+        <button id="edit-spellcheck" type="button" aria-pressed="false">Highlight spelling</button>
+        <button id="edit-flow-spellcheck" type="button">Review flagged words</button>
+        <button id="edit-find-replace" type="button">Find and replace</button>
+        <label for="edit-spell-locale">Spelling</label>
+        <select id="edit-spell-locale" aria-label="Spelling language">
+          <option value="en-GB">English (UK)</option>
+          <option value="en-US">English (US)</option>
+        </select>
+      </section>
+      <section class="edit-tools-section" aria-labelledby="edit-screenplay-heading">
+        <h2 id="edit-screenplay-heading">Screenplay</h2>
+        <button id="edit-title-page" type="button">Title page &amp; paper size</button>
+        <button id="edit-writing-settings" type="button">Writing settings</button>
+      </section>
+      <section class="edit-tools-section" aria-labelledby="edit-project-heading">
+        <h2 id="edit-project-heading">Project</h2>
+        <button id="edit-recover-unsaved" type="button">Recover unsaved writing as copy</button>
+        <button id="edit-restore-backup" type="button">Restore backup as copy</button>
+        <button id="edit-library-folder" type="button">Open library folder</button>
+        <button id="edit-keyboard-settings" type="button">Keyboard settings</button>
+      </section>
+      <section class="edit-tools-section" aria-labelledby="edit-characters-heading">
+        <h2 id="edit-characters-heading">Characters</h2>
+        <p class="edit-panel-hint">Rename every cue, or move a character's cues and dialogue to Darlings.</p>
+        <label for="edit-character-select">Character</label>
+        <select id="edit-character-select" aria-label="Choose a character">
+          <option value="">Choose a character</option>
+        </select>
+        <label for="edit-character-name">New name</label>
+        <input id="edit-character-name" type="text" autocomplete="off" spellcheck="false" placeholder="Character name" />
+        <div class="edit-character-actions">
+          <button id="edit-character-rename" type="button">Rename</button>
+          <button id="edit-character-delete" type="button" class="quiet-danger">Delete</button>
+        </div>
+      </section>
+    </aside>
 
     <!-- Find & replace -->
     <div id="searchbar" hidden>
@@ -140,5 +205,7 @@
 
   <script src="covers.js"></script>
   <script src="app.js"></script>
+  <script src="screenplay.js"></script>
+  <script src="screenplay-layout.js"></script>
 </body>
 </html>

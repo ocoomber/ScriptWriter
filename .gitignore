@@ -1,8 +1,10 @@
 # dependencies
 node_modules/
+.test-output/
 
 # build output
 dist/
+.build-stage/
 
 # macOS
 .DS_Store

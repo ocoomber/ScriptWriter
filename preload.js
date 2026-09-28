@@ -1,6 +1,11 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('neo', {
+  inspectRecovery: (bookId) => ipcRenderer.invoke('recovery:inspect', bookId),
+  preserveRecovery: (bookId) => ipcRenderer.invoke('recovery:preserve', bookId),
+  openLibraryFolder: () => ipcRenderer.invoke('library:openFolder'),
+  recoverCopy: (bookId) => ipcRenderer.invoke('recovery:copy', bookId),
+  // Kept as `neo` internally so the inherited renderer can be adapted in place.
   readLibrary: () => ipcRenderer.invoke('library:read'),
   writeLibrary: (data) => ipcRenderer.invoke('library:write', data),
 
@@ -18,6 +23,10 @@ contextBridge.exposeInMainWorld('neo', {
 
   readJSON: (bookId, name, fallback) => ipcRenderer.invoke('json:read', bookId, name, fallback),
   writeJSON: (bookId, name, data) => ipcRenderer.invoke('json:write', bookId, name, data),
+  listBackups: (bookId) => ipcRenderer.invoke('backup:list', bookId),
+  restoreBackup: (bookId, archiveName) => ipcRenderer.invoke('backup:restore', bookId, archiveName),
+  onBeforeQuit: (cb) => ipcRenderer.on('app:beforeQuit', () => cb()),
+  flushComplete: (saved = true) => ipcRenderer.invoke('app:flushComplete', saved),
 
   exportSave: (payload) => ipcRenderer.invoke('export:save', payload),
   emailDraft: (payload) => ipcRenderer.invoke('email:draft', payload),
@@ -39,6 +48,8 @@ contextBridge.exposeInMainWorld('neo', {
   spellCheckWords: (words) => ipcRenderer.invoke('spell:check', words),
   spellSuggest: (word) => ipcRenderer.invoke('spell:suggest', word),
   spellLearn: (word) => ipcRenderer.invoke('spell:learn', word),
+  spellSettings: () => ipcRenderer.invoke('spell:settings'),
+  setSpellLanguage: (language) => ipcRenderer.invoke('spell:setLanguage', language),
   appVersion: () => ipcRenderer.invoke('app:version'),
   openRelease: () => ipcRenderer.invoke('update:openRelease'),
 
