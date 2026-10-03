@@ -463,7 +463,7 @@ async function renderShelves() {
         if (!paths.length) return;
         toast('Importing…');
         const results = await window.neo.importFiles(paths);
-        if (!results.length) { toast('No .docx, .txt, or .md files in that drop'); return; }
+        if (!results.length) { toast('No .fountain, .docx, .txt, or .md files in that drop'); return; }
         await addImportedBooks(results, shelf);
         return;
       }
@@ -507,6 +507,14 @@ async function renderShelves() {
     blank.title = 'Start a new screenplay';
     blank.onclick = () => createBookOnShelf(shelf);
     row.appendChild(blank);
+
+    const importTile = document.createElement('button');
+    importTile.className = 'import-book';
+    importTile.type = 'button';
+    importTile.textContent = 'Import screenplay';
+    importTile.title = 'Import a Fountain screenplay or manuscript into this shelf';
+    importTile.onclick = () => importBooks(shelf);
+    row.appendChild(importTile);
 
     sec.appendChild(label);
     sec.appendChild(row);
@@ -649,7 +657,7 @@ function bookTile(meta) {
   el.addEventListener('contextmenu', async (e) => {
     e.preventDefault();
     const options = [
-      { label: meta.coverImage ? 'Replace cover art…' : 'Set cover art…', desc: 'Pick an image (2:3 works best). Or just drag one from Finder onto the book.', value: 'cover' }
+      { label: meta.coverImage ? 'Replace cover art…' : 'Set cover art…', value: 'cover' }
     ];
     if (meta.coverImage) {
       options.push({ label: 'Remove cover art', desc: 'Deletes the image from the book folder. (To just hide it, use the \u21bb on the book.)', danger: true, value: 'uncover' });
@@ -727,14 +735,7 @@ function bookPlainText() {
 // Paint the open book, or a book on the shelf (text is read from disk then).
 async function requestPaint(meta, text) {
   const provider = coverProvider();
-  if (!(await window.neo.hasSecret(provider))) {
-    if (!library.coverArtNudged) {
-      library.coverArtNudged = true;
-      await window.neo.writeLibrary(library);
-      toast('This story just passed 1,000 words \u2014 add an API key under File \u2192 Cover Art\u2026 and NEO will paint it a cover.', 8000);
-    }
-    return;
-  }
+  if (!(await window.neo.hasSecret(provider))) return;
   meta.coverArt = { status: 'pending', at: new Date().toISOString(), words: meta.wordCount || 0 };
   if (book && book.id === meta.id) scheduleMetaSave();
   else await window.neo.writeBookMeta(meta.id, meta);
@@ -792,13 +793,13 @@ async function refreshCover(meta, el) {
   const enough = (meta.wordCount || 0) >= PAINT_AT;
   const hasKey = await window.neo.hasSecret(coverProvider());
   const options = [];
-  if (meta.coverImage && mode !== 'image') options.push({ label: 'Show your cover art', desc: 'The image you gave this book.', value: 'image' });
-  if (hasPainting(meta) && mode !== 'painted') options.push({ label: 'Show NEO\u2019s painting', desc: 'The cover painted from the text.', value: 'painted' });
-  if (mode !== 'abstract') options.push({ label: 'Show the abstract', desc: 'The seeded cover every book starts with.', value: 'abstract' });
-  options.push({ label: 'New type & colours', desc: mode === 'abstract' ? 'A fresh abstract and a different title style.' : 'Re-sets the title in a different style over the same art.', value: 'reroll' });
+  if (meta.coverImage && mode !== 'image') options.push({ label: 'Show cover art', value: 'image' });
+  if (hasPainting(meta) && mode !== 'painted') options.push({ label: 'Show painted cover', value: 'painted' });
+  if (mode !== 'abstract') options.push({ label: 'Show abstract cover', value: 'abstract' });
+  options.push({ label: 'New type & colours', value: 'reroll' });
   if (hasKey) {
     options.push(enough
-      ? { label: hasPainting(meta) ? 'Paint it again' : 'Paint a cover from the text', desc: 'NEO reads the manuscript and paints a new cover. About a minute; a few cents.', value: 'paint' }
+      ? { label: hasPainting(meta) ? 'Paint again' : 'Paint a cover', desc: 'Uses AI; API charges may apply.', value: 'paint' }
       : { label: 'Paint a cover from the text', desc: `Once the story passes ${PAINT_AT.toLocaleString()} words.`, value: 'nope' });
   }
   // a plain abstract with nothing else to offer just re-rolls
@@ -2056,12 +2057,6 @@ function renderNav() {
   });
 }
 
-$('#nav-add').onclick = () => {
-  switchTab('manuscript');
-  currentChapterId = book.chapterOrder[book.chapterOrder.length - 1] || null;
-  newChapter();
-};
-
 // drop target for chapter reordering, with a gold line showing the landing spot
 const navList = $('#nav-list');
 // Keep the scene list at the width the writer chose.
@@ -2256,36 +2251,40 @@ $('#side-pin').onclick = () => {
 $('#side-close').onclick = closeDarlingsPanel;
 $('#export-pdf').onclick = () => doExport('pdf').catch(error => toast('Could not save PDF: ' + error.message, 10000));
 
-// The page is the default workspace. Reaching the bottom edge deliberately
+// The page is the default workspace. Reaching the top edge deliberately
 // reveals management controls; returning to the page puts them away.
-const bottomHotzone = $('#bottom-hotzone');
-const bottomBar = $('#bottombar');
-bottomBar.inert = true;
+const topHotzone = $('#top-hotzone');
+const topBar = $('#topbar');
+topBar.inert = true;
 let controlsHideTimer;
 const revealControls = () => {
   clearTimeout(controlsHideTimer);
-  bottomBar.inert = false;
+  topBar.inert = false;
   $('#editor-view').classList.add('controls-visible');
 };
 const hideControls = () => {
   clearTimeout(controlsHideTimer);
-  if (bottomBar.contains(document.activeElement)) document.activeElement.blur();
-  bottomBar.inert = true;
+  if (topBar.contains(document.activeElement)) document.activeElement.blur();
+  topBar.inert = true;
   $('#editor-view').classList.remove('controls-visible');
 };
 const hideControlsAfterLeaving = () => {
   clearTimeout(controlsHideTimer);
   controlsHideTimer = setTimeout(() => {
-    const keyboardFocus = bottomBar.contains(document.activeElement) && document.activeElement.matches(':focus-visible');
-    if (!bottomHotzone.matches(':hover') && !bottomBar.matches(':hover') && !keyboardFocus) hideControls();
+    const keyboardFocus = topBar.contains(document.activeElement) && document.activeElement.matches(':focus-visible');
+    if (!topHotzone.matches(':hover') && !topBar.matches(':hover') && !$('#dragstrip').matches(':hover') && !keyboardFocus) hideControls();
   }, 180);
 };
-bottomHotzone.addEventListener('pointermove', revealControls);
-bottomHotzone.addEventListener('pointerleave', hideControlsAfterLeaving);
-bottomHotzone.addEventListener('focus', revealControls);
-bottomHotzone.addEventListener('click', revealControls);
-bottomBar.addEventListener('pointerenter', revealControls);
-bottomBar.addEventListener('pointerleave', hideControlsAfterLeaving);
+topHotzone.addEventListener('pointermove', revealControls);
+topHotzone.addEventListener('pointerleave', hideControlsAfterLeaving);
+topHotzone.addEventListener('focus', revealControls);
+topHotzone.addEventListener('click', revealControls);
+topBar.addEventListener('pointerenter', revealControls);
+topBar.addEventListener('pointerleave', hideControlsAfterLeaving);
+$('#dragstrip').addEventListener('pointermove', () => {
+  if (!$('#editor-view').hidden) revealControls();
+});
+$('#dragstrip').addEventListener('pointerleave', hideControlsAfterLeaving);
 window.addEventListener('blur', hideControls);
 $('#paper-scroll').addEventListener('pointerdown', () => {
   hideControls();
@@ -2330,9 +2329,9 @@ const darlingsTab = $('.tab.darlings');
 // itself (dropEffect 'copy' keeps Chromium from moving the text on its own).
 let draggedRange = null;
 document.addEventListener('dragstart', (e) => {
-  // any text drag inside the manuscript lights up the bottom bar
+  // any text drag inside the manuscript lights up the top bar
   if (currentTab === 'manuscript' && e.target.closest && e.target.closest('.chapter-body')) {
-    $('#bottombar').classList.add('attn');
+    $('#topbar').classList.add('attn');
     revealControls();
     const sel = window.getSelection();
     draggedRange = sel.rangeCount && !sel.isCollapsed ? sel.getRangeAt(0).cloneRange() : null;
@@ -2340,7 +2339,7 @@ document.addEventListener('dragstart', (e) => {
   }
 });
 document.addEventListener('dragend', () => {
-  $('#bottombar').classList.remove('attn');
+  $('#topbar').classList.remove('attn');
   $('#side-pane').classList.remove('drag-target');
   $('#editor-view').classList.remove('dragging-script');
   draggedRange = null;
@@ -2363,7 +2362,7 @@ darlingsTab.addEventListener('drop', async (e) => {
 });
 
 // Let a writer reveal the right edge and drop directly into Darlings without
-// aiming for the small footer tab.
+// aiming for the small header tab.
 const sidePane = $('#side-pane');
 const sideHotzone = $('#side-hotzone');
 const acceptDarlingDrag = (e) => {
@@ -2916,22 +2915,26 @@ function bookWordCount() {
 
 function updateCounters() {
   if (!book) return;
+  const screenplay = !!book.screenplay;
   const total = bookWordCount();
   const wc = $('#word-counter');
+  wc.title = screenplay ? 'Click to cycle screenplay / scene word count' : 'Click to cycle book / chapter word count';
   if (wordMode === 'book') {
     wc.textContent = total.toLocaleString() + ' words';
   } else {
     const n = currentChapterId ? chapterWords(currentChapterId) : 0;
     const idx = book.chapterOrder.indexOf(currentChapterId);
-    wc.textContent = `ch. ${idx + 1}: ${n.toLocaleString()} words`;
+    wc.textContent = `${screenplay ? 'scene' : 'ch.'} ${idx + 1}: ${n.toLocaleString()} words`;
   }
   const pos = $('#pos-counter');
   const idx = book.chapterOrder.indexOf(currentChapterId);
-  pos.textContent = book.chapterOrder.length <= 1
-    ? '' // a chapterless story needs no chapter locator
-    : (idx >= 0
-      ? `chapter ${idx + 1} of ${book.chapterOrder.length}`
-      : `${book.chapterOrder.length} chapters`);
+  pos.textContent = screenplay
+    ? (idx >= 0 ? `scene ${idx + 1} of ${book.chapterOrder.length}` : `${book.chapterOrder.length} scenes`)
+    : book.chapterOrder.length <= 1
+      ? '' // a chapterless story needs no chapter locator
+      : (idx >= 0
+        ? `chapter ${idx + 1} of ${book.chapterOrder.length}`
+        : `${book.chapterOrder.length} chapters`);
   // cache for the bookshelf progress bar
   if (book.wordCount !== total) {
     // only a true crossing earns a painting — a story that was already long
@@ -3445,20 +3448,61 @@ $('#search-close').onclick = closeSearch;
 
 const escHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
-// Turn parsed manuscripts into books on a shelf — used by the file picker
-// and by dropping files from Finder straight onto a shelf.
+function reserveImportedTitle(title, titles) {
+  const base = String(title || 'Untitled').trim() || 'Untitled';
+  const key = value => value.normalize('NFKC').replace(/\s+/g, ' ').toLowerCase();
+  let name = base, suffix = 2;
+  while (titles.has(key(name))) name = `${base} (${suffix++})`;
+  titles.add(key(name));
+  return name;
+}
+
+// Turn parsed manuscripts into books on a shelf, from the picker or a file drop.
 async function addImportedBooks(results, shelf) {
   shelf = shelf || shelvesFor(currentAuthor().id)[0] || library.shelves[0];
+  const titles = new Set();
+  const ids = [...new Set(library.shelves.flatMap(item => item.bookIds))];
+  const existing = await Promise.all(ids.map(id => window.neo.readBookMeta(id)));
+  for (const meta of existing) if (meta) titles.add(String(meta.title || 'Untitled').trim().normalize('NFKC').replace(/\s+/g, ' ').toLowerCase());
   let ok = 0;
   for (const r of results) {
     if (r.error) { toast(`Couldn't import ${r.name}: ${r.error}`, 6000); continue; }
+    if (r.screenplay) {
+      const script = r.screenplay;
+      const title = reserveImportedTitle(script.title || r.name, titles);
+      const meta = await window.neo.createBook({ author: script.author || displayAuthor(), title });
+      meta.title = title;
+      meta.author = script.author || '';
+      meta.screenplay = { title: meta.title, writer: script.author || '', contact: script.contact || '', pageSize: 'A4' };
+      meta.chapterTitles = {};
+      let words = 0;
+      for (const scene of script.chapters) {
+        const chId = 'ch-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6);
+        const html = scene.map((element) => {
+          const type = element.type;
+          if (!['scene-heading', 'action', 'character', 'parenthetical', 'dialogue', 'transition'].includes(type)) return '';
+          const content = escHtml(element.text || '').replace(/\n/g, '<br>') || '<br>';
+          words += countWords(element.text || '');
+          return `<p class="screenplay-element sp-block" data-element="${type}" data-id="el-${Math.random().toString(36).slice(2)}">${content}</p>`;
+        }).join('');
+        await window.neo.writeChapter(meta.id, chId, html);
+        meta.chapterOrder.push(chId);
+        meta.chapterTitles[chId] = scene.find((element) => element.type === 'scene-heading')?.text || 'UNTITLED SCENE';
+      }
+      meta.wordCount = words;
+      await window.neo.writeBookMeta(meta.id, meta);
+      shelf.bookIds.push(meta.id);
+      ok++;
+      continue;
+    }
     // title/byline harvested from the document beat the filename;
     // passing the title in gives the book folder a readable name too
+    const title = reserveImportedTitle(r.title || r.name, titles);
     const meta = await window.neo.createBook({
       author: r.author || displayAuthor(),
-      title: r.title || r.name
+      title
     });
-    meta.title = r.title || r.name;
+    meta.title = title;
     meta.tabNames = {
       notes: (library.tabDefaults && library.tabDefaults.notes) || 'Notes',
       outline: (library.tabDefaults && library.tabDefaults.outline) || 'Outline'
@@ -3480,12 +3524,12 @@ async function addImportedBooks(results, shelf) {
   }
   await window.neo.writeLibrary(library);
   if (!$('#bookshelf-view').hidden) renderShelves();
-  if (ok) toast(`${ok} book${ok === 1 ? '' : 's'} imported onto “${shelf.name}” — chapters and scene breaks detected`, 6000);
+  if (ok) toast(`${ok} manuscript${ok === 1 ? '' : 's'} imported onto “${shelf.name}”`, 6000);
 }
 
-async function importBooks() {
+async function importBooks(shelf) {
   const results = await window.neo.importPick();
-  if (results.length) await addImportedBooks(results, shelvesFor(currentAuthor().id)[0] || library.shelves[0]);
+  if (results.length) await addImportedBooks(results, shelf?.bookIds ? shelf : shelvesFor(currentAuthor().id)[0] || library.shelves[0]);
 }
 
 $('#import-btn').onclick = importBooks;
@@ -3906,6 +3950,10 @@ function toggleTypewriter() {
 
 document.addEventListener('selectionchange', () => {
   if (!typewriterEnabled || !book || currentTab !== 'manuscript') return;
+  if (document.body.classList.contains('screenplay-mode') && window.scheduleScreenplayCaretCenter) {
+    window.scheduleScreenplayCaretCenter();
+    return;
+  }
   const sel = window.getSelection();
   if (!sel.rangeCount || !sel.isCollapsed) return;
   let el = sel.anchorNode;
@@ -3999,7 +4047,7 @@ function openCoverArt() {
   bd.innerHTML = `
     <div class="modal" style="width:540px">
       <h2 style="font-size:17px">Cover art</h2>
-      <p>Every book gets a cover on the shelf: an abstract with the title set in type. With an OpenAI key, NEO can also read a story once it passes ${PAINT_AT.toLocaleString()} words and paint a cover from the text. Paintings stay on your shelf — exports never include them.</p>
+      <p>AI covers use screenplay text and an API key. API charges may apply.</p>
       <div class="stats-row">
         <select id="ca-provider" hidden>${provOptions}</select>
         <label class="st-check"><input id="ca-auto" type="checkbox"${cs.auto === false ? '' : ' checked'}/> paint at ${PAINT_AT.toLocaleString()} words</label>
@@ -4200,6 +4248,7 @@ function setPageZoom(next) {
   if (next === (library.pageZoom || 1)) return;
   library.pageZoom = next;
   document.documentElement.style.setProperty('--page-zoom', next);
+  if (book?.screenplay) window.scheduleScreenplayLayout?.();
   updateZoomDisplay();
   clearTimeout(zoomSaveTimer);
   zoomSaveTimer = setTimeout(() => { window.neo.writeLibrary(library); }, 600);
@@ -4210,7 +4259,7 @@ $('#editor-view').addEventListener('wheel', (e) => {
   setPageZoom((library.pageZoom || 1) * Math.exp(-e.deltaY * 0.005));
 }, { passive: false });
 
-// zoom control in the bottom bar: buttons, click-to-reset, and scroll
+// zoom control in the top bar: buttons, click-to-reset, and scroll
 $('#zoom-in').onclick = () => setPageZoom((library.pageZoom || 1) + 0.1);
 $('#zoom-out').onclick = () => setPageZoom((library.pageZoom || 1) - 0.1);
 $('#zoom-level').onclick = () => setPageZoom(1);
@@ -4277,7 +4326,7 @@ function showHelp() {
       <div class="help-sec">Files</div>
       <div class="help-grid">
         ${row(K('⌘E', 'Ctrl+E'), 'Email a timestamped draft to yourself')}
-        ${row(K('⌘⇧I', 'Ctrl+Shift+I'), 'Import .docx / .txt / .md manuscripts')}
+        ${row(K('⌘⇧I', 'Ctrl+Shift+I'), 'Import .fountain / .docx / .txt / .md manuscripts')}
         ${row('File → Export', 'txt · md · html · pdf · docx · epub')}
       </div>
 
@@ -4958,7 +5007,7 @@ function reportError(msg) {
   window.neo.logError(msg);
   if (!errorToastShown) {
     errorToastShown = true;
-    toast('Something hiccuped — your words are safe, and the details were logged');
+    toast('Application error. Details were logged.');
   }
 }
 window.addEventListener('error', (e) => reportError(`${e.message} @ ${e.filename}:${e.lineno}`));
@@ -4968,6 +5017,6 @@ window.addEventListener('unhandledrejection', (e) => reportError('Unhandled: ' +
 
 loadLibrary().then(() => {
   applyFonts();
-  typewriterEnabled = !!library.typewriter;
+  typewriterEnabled = library.typewriter !== false;
   applyTypewriter();
 });

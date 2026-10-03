@@ -1,14 +1,18 @@
 # ScriptWriter
 
-ScriptWriter is an early Windows desktop screenplay editor built from the open-source [NEO](https://github.com/hughhowey/neo) writing app. It keeps the writing area quiet while adding screenplay elements, a separate title page, an independent outline, Darlings, and PDF export.
+ScriptWriter is an early Windows desktop screenplay editor built from the open-source [NEO](https://github.com/hughhowey/neo) writing app. It keeps the writing area quiet while adding screenplay elements, numbered scene headings, a separate title page, an independent outline, Darlings, and PDF export.
 
 This is a development build. Automated checks cover basic typing, Outline, Darlings, and PDF flows; printed page breaks and margins still need broader comparison before relying on a PDF for submission.
 
 ## Use ScriptWriter
 
-Open the Windows installer or portable executable when one is provided. The library is stored in your Windows Documents folder under `ScriptWriter Library`. In the editor, move the pointer to the bottom edge, then choose **Tools → Open library folder** to open its exact location in Explorer, including if Documents is redirected to OneDrive.
+Open the Windows installer or portable executable when one is provided. The library is stored in your Windows Documents folder under `ScriptWriter Library`. In the editor, move the pointer to the top edge, then choose **Tools → Open library folder** to open its exact location in Explorer, including if Documents is redirected to OneDrive.
 
 Each screenplay has its own folder. The manuscript is readable HTML, with supporting screenplay data in JSON. ScriptWriter saves as you write and keeps up to 14 daily ZIP backups in each screenplay's `Backups` folder. Use **Tools → Restore backup as copy** to recover a separate screenplay without replacing the current one.
+
+To bring in a Fountain screenplay, use **Import screenplay** on the library screen and choose a `.fountain` file. ScriptWriter creates a separate editable screenplay with scene headings, action, character cues, parentheticals, dialogue, transitions, and title-page title, writer, and contact details. Duplicate imported titles get a numbered suffix, ignoring capitalisation. Fountain notes, sections, synopses, and production features are not imported.
+
+Use the **⋯** button on a screenplay card, or right-click the card, to rename it or move it to the Windows Recycle Bin after confirmation.
 
 For keyboard controls and the current development limits, see [TUTORIAL.md](TUTORIAL.md).
 

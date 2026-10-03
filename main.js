@@ -638,7 +638,7 @@ ipcMain.handle('email:draft', async (_e, { to, subject, body, html, defaultName,
 });
 
 // ---------------------------------------------------------------------------
-// Import: .docx / .txt / .md → chapters
+// Import: .docx / .txt / .md → chapters; .fountain → screenplay scenes
 // ---------------------------------------------------------------------------
 
 const decodeEntities = (s) => s
@@ -648,6 +648,10 @@ const decodeEntities = (s) => s
 async function importFile(fp) {
   const name = path.basename(fp).replace(/\.[^.]+$/, '');
   const ext = path.extname(fp).toLowerCase();
+  if (ext === '.fountain') {
+    const { parseFountain } = require('./fountain-import.cjs');
+    return { name, screenplay: parseFountain(fs.readFileSync(fp, 'utf8'), name) };
+  }
   let paras = [];
 
   if (ext === '.docx') {
@@ -750,7 +754,7 @@ async function importFile(fp) {
 ipcMain.handle('import:files', async (_e, paths) => {
   const out = [];
   for (const fp of paths || []) {
-    if (!/\.(docx|txt|md)$/i.test(fp)) continue;
+    if (!/\.(docx|txt|md|fountain)$/i.test(fp)) continue;
     try {
       out.push(await importFile(fp));
     } catch (err) {
@@ -766,7 +770,7 @@ ipcMain.handle('import:pick', async () => {
   const { canceled, filePaths } = await dialog.showOpenDialog(win, {
     title: 'Bring your manuscripts home',
     properties: ['openFile', 'multiSelections'],
-    filters: [{ name: 'Manuscripts', extensions: ['docx', 'txt', 'md'] }]
+    filters: [{ name: 'Manuscripts and screenplays', extensions: ['docx', 'txt', 'md', 'fountain'] }]
   });
   if (canceled || !filePaths.length) return [];
   const out = [];

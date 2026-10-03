@@ -14,11 +14,11 @@ Inspired by https://github.com/hughhowey/neo
 - 12-point fixed-width Courier-style face, conventional margins, element indents, spacing, page numbers, and page breaks. The editable view should resemble the PDF.
 - Elements: scene heading, action, character cue, character extension, parenthetical, dialogue, and transition. The separate title page is hidden while writing and included in PDF export. The library-card title populates it; writer credit and contact details are separate fields.
 - Scene headings display as `INT. LOCATION - TIME` or `EXT. LOCATION - TIME`. The application formats punctuation and case; typed spaces are not used to fake alignment.
-- Initial target is a submission script rather than production pages with scene numbers and locked revisions.
+- Scene headings show automatically renumbered scene numbers on both sides in the editor and PDF. Locked production revisions are outside the initial target.
 
 ## The writing surface
 
-The screenplay page owns the writing view. The Windows menu bar, footer, and edge labels stay hidden while writing. Reaching the bottom edge reveals Library, Scenes, Tools, Outline, Darlings, PDF export, and counters; moving away hides them. The left and right edges reveal Scenes and Darlings on demand. Selecting text reveals only actions for that selection. The character selector aligns with the position where its cue will be inserted.
+The screenplay page owns the writing view. The Windows menu bar, header, and edge labels stay hidden while writing. Reaching the top edge reveals Library, Scenes, Tools, Outline, Darlings, PDF export, and counters; moving away hides them. The left and right edges reveal Scenes and Darlings on demand. Selecting text reveals only actions for that selection. The character selector aligns with the position where its cue will be inserted.
 
 Selecting script text shows Bold, Italic, Underline, and Move to Darlings beside the selection. The on-demand Edit panel also holds these actions, selected-text uppercase and sentence-case tools, spell check with a UK/US English choice, find and replace, and character rename/delete. Deleting a character moves the affected cues and dialogue to Darlings. A same-character cue following an Action direction within a scene displays `(CONT'D)`.
 

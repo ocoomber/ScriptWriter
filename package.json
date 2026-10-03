@@ -1,13 +1,14 @@
 {
   "name": "scriptwriter",
   "productName": "ScriptWriter",
-  "version": "0.1.8",
+  "version": "0.1.18",
   "description": "A focused desktop editor for screenplays.",
   "homepage": "",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "test": "node tests/run.cjs",
+    "test:headless": "node tests/headless.cjs",
     "package": "electron-builder --win",
     "package:win": "node package-windows.cjs",
     "package:linux": "electron-builder --linux",
@@ -83,6 +84,7 @@
     },
     "files": [
       "main.js",
+      "fountain-import.cjs",
       "recovery-state.cjs",
       "preload.js",
       "index.html",
@@ -111,6 +113,6 @@
     "nspell": "^2.1.5"
   },
   "allowScripts": {
-    "electron@33.4.11": true
+    "electron@43.7.7": true
   }
 }

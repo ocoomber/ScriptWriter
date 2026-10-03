@@ -12,8 +12,8 @@ body[data-page-size="letter"] {
   --screenplay-page-height: 1056px;
 }
 body[data-page-size="letter"] .screenplay-page {
-  width: calc(816px * var(--page-zoom, 1));
-  height: calc(1056px * var(--page-zoom, 1));
+  width: 816px;
+  height: 1056px;
   page: screenplay-letter;
 }
 
@@ -32,7 +32,7 @@ body[data-page-size="letter"] .screenplay-page {
   align-items: stretch; gap: 14px; min-height: 0; padding: 0;
   border: 0; box-shadow: none;
 }
-.book, .new-book {
+.book, .new-book, .import-book {
   width: auto; height: 112px; border-radius: 8px; box-shadow: none;
   transition: border-color .14s ease, background .14s ease;
 }
@@ -41,7 +41,7 @@ body[data-page-size="letter"] .screenplay-page {
   overflow: hidden;
 }
 .book::before, .book::after { display: none !important; }
-.book:hover, .new-book:hover { transform: none; border-color: #555; }
+.book:hover, .new-book:hover, .import-book:hover { transform: none; border-color: #555; }
 .book .b-text {
   position: static; height: 100%; padding: 18px 18px 14px;
   justify-content: space-between; pointer-events: none;
@@ -50,16 +50,24 @@ body[data-page-size="letter"] .screenplay-page {
 .book .b-title {
   display: block; color: #eee; font: 15px/1.4 Georgia, serif;
   text-align: left; overflow: hidden; max-height: 44px;
+  padding-right: 24px;
 }
+.screenplay-menu {
+  position: absolute; top: 10px; right: 10px; width: 30px; height: 30px;
+  padding: 0; border: 1px solid #45433e; border-radius: 5px;
+  background: #222; color: #bbb; font-size: 20px; line-height: 1; cursor: pointer;
+}
+.screenplay-menu:hover { color: var(--accent); border-color: var(--accent); }
+.screenplay-menu:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .book .b-author { display: none; }
 .book .b-refresh, .book .b-painting, .book .b-progress { display: none !important; }
-.new-book {
+.new-book, .import-book {
   min-height: 112px; color: #969186; background: transparent;
   border: 1px dashed #45433e; font-size: 14px; font-weight: 400;
   font-family: inherit; cursor: pointer;
 }
-.new-book:hover { color: var(--accent); border-color: var(--accent); }
-.new-book:focus-visible { color: var(--accent); border-color: var(--accent); outline: 2px solid var(--accent); outline-offset: 2px; }
+.new-book:hover, .import-book:hover { color: var(--accent); border-color: var(--accent); }
+.new-book:focus-visible, .import-book:focus-visible { color: var(--accent); border-color: var(--accent); outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* First run remains compatible with Neo's setup code, with screenplay wording. */
 #fr-pen { display: none; }
@@ -69,18 +77,20 @@ label:has(#fr-pen) { display: none; }
 
 /* Script page geometry: A4 by default, with a per-script Letter variant. */
 #paper-scroll {
-  width: min(calc(var(--screenplay-page-width) + 72px), 100%);
+  width: min(calc(var(--screenplay-page-width) * var(--page-zoom, 1) + 72px), 100%);
   bottom: 0;
+  overflow-anchor: none;
 }
 #paper {
-  width: max-content; max-width: none; min-width: 100%;
+  width: var(--screenplay-page-width); max-width: none; min-width: 0;
   margin: 32px auto 100px;
 }
+body.screenplay-mode.typewriter #paper { margin-top: 50vh; margin-bottom: 60vh; }
 .screenplay-page,
 .chapter.screenplay-page,
 .chapter.sheet.screenplay-page {
-  width: calc(var(--screenplay-page-width) * var(--page-zoom, 1));
-  min-height: calc(var(--screenplay-page-height) * var(--page-zoom, 1));
+  width: var(--screenplay-page-width);
+  min-height: var(--screenplay-page-height);
   height: auto; max-width: none; overflow: visible;
   margin: 0 auto 28px; padding: 1in 1in 0.75in 1.5in;
   background: #fff; color: #111;
@@ -89,8 +99,8 @@ label:has(#fr-pen) { display: none; }
 }
 .screenplay-page[data-page-size="letter"],
 .chapter.screenplay-page[data-page-size="letter"] {
-  width: calc(816px * var(--page-zoom, 1));
-  min-height: calc(1056px * var(--page-zoom, 1));
+  width: 816px;
+  min-height: 1056px;
   height: auto;
   page: screenplay-letter;
 }
@@ -130,6 +140,14 @@ body.night .chapter.screenplay-page { background: #fff; color: #111; }
 .screenplay-page .chapter-body p::first-letter { float: none; font-size: inherit; padding: 0; }
 .screenplay-page .chapter-body p[data-element="scene-heading"],
 .screenplay-page .chapter-body p.sp-heading { margin: 0 0 1em; text-transform: uppercase; }
+.screenplay-page .chapter-body p[data-element="scene-heading"][data-scene-number]::before,
+.screenplay-page .chapter-body p[data-element="scene-heading"][data-scene-number]::after {
+  content: attr(data-scene-number);
+  position: absolute; top: 0; width: 3em;
+  font: inherit; text-align: center; pointer-events: none;
+}
+.screenplay-page .chapter-body p[data-element="scene-heading"][data-scene-number]::before { left: -3em; }
+.screenplay-page .chapter-body p[data-element="scene-heading"][data-scene-number]::after { right: -3em; }
 .screenplay-page .chapter-body p[data-element="action"],
 .screenplay-page .chapter-body p.sp-action { margin: 0 0 1em; }
 .screenplay-page .chapter-body p[data-element="character"],
@@ -142,7 +160,8 @@ body.night .chapter.screenplay-page { background: #fff; color: #111; }
 .screenplay-page .chapter-body p.sp-transition { margin: 1em 0 1em auto; text-align: right; text-transform: uppercase; }
 
 /* Hidden edge panels: scenes to the left and Darlings to the right. */
-#nav-hotzone, #side-hotzone { width: 14px; }
+#nav-hotzone, #side-hotzone { width: 42px; }
+#top-hotzone { height: 32px; }
 #nav-pane, #side-pane { background: #202020; }
 #nav-hotzone::after, #side-hotzone::after {
   position: absolute; top: 50%; transform: translateY(-50%); padding: 8px 3px;
@@ -155,6 +174,14 @@ body.night .chapter.screenplay-page { background: #fff; color: #111; }
 #side-hotzone::after { content: "Darlings"; right: 0; border-right: 0; border-radius: 4px 0 0 4px; }
 #nav-hotzone:hover::after, #side-hotzone:hover::after {
   color: var(--accent); border-color: var(--accent); opacity: 1;
+}
+.sp-scene-number { flex: none; width: 2.5em; color: #a99b7e; font-variant-numeric: tabular-nums; }
+.screenplay-page [data-element="scene-heading"].scene-jump-highlight {
+  animation: scene-jump-flash 1.6s ease-out;
+}
+@keyframes scene-jump-flash {
+  0%, 35% { background: #f6e6a8; box-shadow: 0 0 0 6px #f6e6a8; }
+  100% { background: transparent; box-shadow: none; }
 }
 #editor-view.dragging-script #side-hotzone::after {
   content: "Drop in Darlings"; color: var(--accent); border-color: var(--accent); opacity: 1;
@@ -170,7 +197,6 @@ body.night .chapter.screenplay-page { background: #fff; color: #111; }
 #side-head span::after {
   content: "Darlings"; font-size: 11px; color: inherit;
 }
-.side-darlings-hint { margin: 0 16px 12px; color: #aaa69d; font: 11px/1.45 Arial, sans-serif; }
 #side-pane .darling { margin: 0 12px 10px; padding: 10px; border-color: #494239; background: #292723; color: #ddd; font: 12px/1.45 Arial, sans-serif; }
 #side-pane .darling .d-meta { margin: 7px 0; color: #aaa69d; }
 #side-pane .darling button { color: #e7d1aa; border-color: #74654e; }
@@ -216,7 +242,6 @@ body.night .chapter.screenplay-page { background: #fff; color: #111; }
 #sp-darling-placement span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #bbb; }
 #sp-darling-placement button { flex: none; border: 1px solid #73644c; border-radius: 4px; padding: 5px 9px; background: transparent; color: #eee; cursor: pointer; }
 #sp-darling-placement button:hover { border-color: var(--accent); }
-#nav-add { font-size: 12px; }
 .nav-item { border-left-width: 2px; }
 .nav-item:hover { background: #292929; }
 
@@ -266,20 +291,20 @@ body.night .chapter.screenplay-page { background: #fff; color: #111; }
 }
 .sp-picker-choice.selected { color: #fff; background: #35342f; }
 
-/* Work controls appear only when the writer reaches the bottom edge. */
+/* Work controls appear only when the writer reaches the top edge. */
 #goal-counter { display: none !important; }
 .tab[data-tab="notes"] { display: none !important; }
 #back-to-shelf { font-size: 0; }
 #back-to-shelf::after { content: "Library"; font-size: 12px; }
 
-/* Quiet Edit tools, opened on demand from the footer. */
+/* Quiet Edit tools, opened on demand from the header. */
 #edit-toggle {
   padding: 5px 10px; color: var(--muted); background: transparent;
   border: 1px solid #343434; border-radius: 5px; font-size: 12px;
 }
 #edit-toggle:hover, #edit-toggle[aria-expanded="true"] { color: var(--accent); border-color: #514a3b; }
 #edit-panel {
-  position: fixed; left: 16px; bottom: 50px; z-index: 180;
+  position: fixed; left: 16px; top: 78px; z-index: 180;
   width: min(300px, calc(100vw - 32px)); max-height: min(78vh, 680px);
   overflow-y: auto; padding: 14px; color: #ddd; background: #202020;
   border: 1px solid #383838; border-radius: 8px;
@@ -302,7 +327,6 @@ body.night .chapter.screenplay-page { background: #fff; color: #111; }
 .edit-tools-section label { margin-top: 3px; color: #777; font-size: 11px; }
 .edit-tools-section select, .edit-tools-section input { width: 100%; }
 .edit-tools-section input::placeholder { color: #666; }
-.edit-panel-hint { margin: 0 0 3px; color: #777; font-size: 11px; line-height: 1.4; }
 .edit-character-actions { display: flex; gap: 7px; }
 .edit-character-actions button { flex: 1; }
 #edit-panel .quiet-danger { color: #b88b83; }
@@ -314,10 +338,11 @@ body.night .chapter.screenplay-page { background: #fff; color: #111; }
   @page { size: A4 portrait; margin: 0; }
   @page screenplay-letter { size: Letter portrait; margin: 0; }
   html, body { width: auto; height: auto; overflow: visible; background: #fff !important; }
-  #dragstrip, #bookshelf-view, #nav-hotzone, #nav-pane, #side-hotzone, #bottom-hotzone,
-  #side-pane, #bottombar, #searchbar, #hint, #aux-paper { display: none !important; }
+  #dragstrip, #bookshelf-view, #nav-hotzone, #nav-pane, #side-hotzone, #top-hotzone,
+  #side-pane, #topbar, #searchbar, #hint, #aux-paper { display: none !important; }
   #editor-view, #paper-scroll, #paper, #chapters { position: static; display: block !important; }
   #paper-scroll, #paper { width: auto; max-width: none; margin: 0; overflow: visible; transform: none; }
+  body.screenplay-mode.typewriter #paper { margin: 0; }
   .screenplay-page, .chapter.screenplay-page {
     width: 210mm; min-height: 297mm; height: auto; margin: 0; padding: 25.4mm 25.4mm 19mm 38.1mm;
     box-shadow: none; overflow: visible;

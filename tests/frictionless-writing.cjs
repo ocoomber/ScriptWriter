@@ -75,7 +75,7 @@ const type = text => page.keyboard.type(text);
   assert.equal(await page.locator('.chapter-body [data-element="dialogue"]').last().innerText(), 'Hello. Can you hear me?', 'Dialogue sentences should capitalize as typed');
   await type(" i know phone voice is here. i think i'm ready.");
   assert.equal(await page.locator('.chapter-body [data-element="dialogue"]').last().innerText(),
-    "Hello. Can you hear me? I know PHONE VOICE is here. I think I'm ready.",
+    "Hello. Can you hear me? I know Phone Voice is here. I think I'm ready.",
     'Standalone I and established character names should capitalize while writing dialogue');
   await press('Tab');
   assert.equal(await picker.locator('.selected').innerText(), 'PHONE VOICE', 'Tab should suggest the recent speaker');
@@ -83,7 +83,9 @@ const type = text => page.keyboard.type(text);
   assert.equal(await page.locator('.chapter-body [data-element="character"]').last().innerText(), "PHONE VOICE (CONT'D)",
     'A new cue for the same speaker needs CONT\'D even without an action line');
   await page.evaluate(() => { library.settings = { ...(library.settings || {}), questionMarkAutofill: true }; });
-  await type('who left the door open');
+  await type('who ');
+  assert.equal(await page.locator('.chapter-body [data-element="dialogue"]').last().innerText(), 'Who ?', 'The question mark should appear when the space after Who is typed');
+  await type('left the door open');
   await press('Tab');
   assert.equal(await page.locator('.chapter-body [data-element="dialogue"]').last().innerText(), 'Who left the door open?', 'Question-leading dialogue should receive a question mark when the setting is enabled');
   await press('Escape');
@@ -93,6 +95,20 @@ const type = text => page.keyboard.type(text);
   assert.equal(await page.locator('.chapter-body [data-element="dialogue"]').last().innerText(),
     'Who left the door open? What happened.', 'Turning the question-mark setting off should use a full stop');
   await press('Escape');
+  await type(' theyre sure you shouldnt');
+  await press('Shift+Enter');
+  assert.equal(await page.locator('.chapter-body [data-element="dialogue"]').last().innerText(),
+    "Who left the door open? What happened. They're sure you shouldn't.",
+    'Contractions should gain apostrophes and Shift+Enter should finish Dialogue before Action');
+  assert.equal(await page.locator('.chapter-body [data-element="action"]').last().innerText(), '',
+    'Shift+Enter should begin an empty Action line');
+  await page.evaluate(() => { library.settings.autoApostrophes = false; });
+  await type('youre here ');
+  assert.equal(await page.locator('.chapter-body [data-element="action"]').last().innerText(), 'Youre here ',
+    'Turning off automatic apostrophes should leave typed words unchanged');
+  await press('Enter');
+  assert.equal((await page.locator('.chapter-body [data-element="action"]').allTextContents()).at(-2), 'Youre here.',
+    'Enter should finish an Action sentence when punctuation is missing');
   assert.deepEqual(errors, []);
   console.log('PASS: sentence capitalization, multiword character entry, and character picker insertion position');
   console.log(`Artifacts: ${output}`);

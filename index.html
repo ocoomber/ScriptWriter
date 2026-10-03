@@ -16,7 +16,7 @@
       <h1>ScriptWriter</h1>
       <div class="shelf-header-right">
         <span id="author-chip" title="Click to change your author name"></span>
-        <button id="import-btn" title="Import manuscripts" hidden>&#8681; Import</button>
+        <button id="import-btn" title="Import a Fountain screenplay or manuscript">&#8681; Import</button>
         <button id="add-shelf-btn" title="Add a shelf">+ Shelf</button>
       </div>
     </header>
@@ -27,8 +27,7 @@
   <div id="firstrun" class="modal-backdrop" hidden>
     <div class="modal">
       <div id="fr-step1">
-        <h2>Welcome to ScriptWriter</h2>
-        <p>A quiet place to write screenplays. A few quick choices, then your script is ready.</p>
+        <h2>ScriptWriter</h2>
         <label>Your name <span class="soft">(appears as the author on every document — leave blank for “Anonymous”)</span>
           <input id="fr-name" type="text" autocomplete="off" spellcheck="false" />
         </label>
@@ -36,22 +35,18 @@
           <input id="fr-pen" type="text" autocomplete="off" spellcheck="false" />
         </label>
         <div class="fr-style">
-          <p>How do you like to begin?</p>
           <div class="fr-choices">
             <button class="fr-choice" data-style="pantser">
               <strong>Blank start</strong>
-              <span>Start with a blank screenplay.</span>
             </button>
             <button class="fr-choice" data-style="plotter">
               <strong>Outline start</strong>
-              <span>Start with the independent Outline.</span>
             </button>
           </div>
         </div>
       </div>
       <div id="fr-step2" hidden>
         <h2>How should the page look?</h2>
-        <p>Pick a typeface and a drop-cap style. The sample below shows exactly what you'll get. (Changeable anytime in the Format menu.)</p>
         <div id="fr-sample">
           <p id="fr-sample-text">It was the best of times, it was the worst of times, it was the age of wisdom, it was the age of foolishness, it was the epoch of belief…</p>
         </div>
@@ -74,7 +69,6 @@
     <nav id="nav-pane">
       <div id="nav-head"><div id="nav-label">Scenes</div><button id="nav-close" type="button" aria-label="Close Scenes panel" title="Close">&#10005;</button></div>
       <div id="nav-list"></div>
-      <button id="nav-add" title="Add a scene at the end">+ Scene</button>
       <div id="nav-resizer" role="separator" aria-orientation="vertical" aria-label="Resize scenes panel" title="Drag to resize"></div>
     </nav>
 
@@ -86,7 +80,6 @@
         <button id="side-pin" type="button" aria-pressed="false" title="Keep Darlings panel open">Keep open</button>
         <button id="side-close" type="button" aria-label="Close Darlings panel" title="Close">&#10005;</button>
       </div>
-      <p class="side-darlings-hint">Drag selected script here to save it. Choose Place in script to use it again.</p>
       <div id="sticky-list"></div>
     </aside>
 
@@ -108,10 +101,10 @@
       </div>
     </main>
 
-    <!-- Invisible edge target reveals the work controls only when requested. -->
-    <button id="bottom-hotzone" type="button" aria-label="Show work controls"></button>
+    <!-- Invisible top-edge target reveals the work controls only when requested. -->
+    <button id="top-hotzone" type="button" aria-label="Show work controls"></button>
     <!-- Work controls stay out of the writing view. -->
-    <footer id="bottombar">
+    <header id="topbar">
       <button id="back-to-shelf" title="Back to your screenplay library">&#8676; Library</button>
       <button id="scenes-toggle" type="button" aria-controls="nav-pane" aria-expanded="false" title="Show the scene list">Scenes</button>
       <button id="edit-toggle" aria-controls="edit-panel" aria-expanded="false" title="Writing and project tools">Tools</button>
@@ -125,10 +118,10 @@
       <div id="counters">
         <span id="goal-counter" title="Today's words — click for goals, sprints, and your progress chart"></span>
         <span id="pos-counter"></span>
-        <span id="word-counter" title="Click to cycle book / chapter word count"></span>
+        <span id="word-counter" title="Click to cycle screenplay / scene word count"></span>
         <span id="zoom-control" title="Scroll to zoom, or pinch / Ctrl+Scroll anywhere on the page"><button id="zoom-out" title="Zoom out">&#8722;</button><span id="zoom-level" title="Click to reset to 100%">100%</span><button id="zoom-in" title="Zoom in">+</button></span>
       </div>
-    </footer>
+    </header>
 
     <!-- Writing and project tools stay out of the way until requested. -->
     <aside id="edit-panel" aria-label="Writing and project tools" hidden>
@@ -172,7 +165,6 @@
       </section>
       <section class="edit-tools-section" aria-labelledby="edit-characters-heading">
         <h2 id="edit-characters-heading">Characters</h2>
-        <p class="edit-panel-hint">Rename every cue, or move a character's cues and dialogue to Darlings.</p>
         <label for="edit-character-select">Character</label>
         <select id="edit-character-select" aria-label="Choose a character">
           <option value="">Choose a character</option>

@@ -82,11 +82,14 @@ async function exportPdf(target) {
     pageCount: Number(document.querySelector('#chapters').dataset.pageCount),
     gaps: document.querySelectorAll('.sp-page-gap').length,
     numbers: [...document.querySelectorAll('#chapters > .sp-page-number')].map(n => n.textContent),
+    sceneNumbers: [...document.querySelectorAll('.chapter-body > [data-element="scene-heading"]')].map(n => n.dataset.sceneNumber),
     geometry: [...document.querySelectorAll('.chapter-body > [data-element]')].map(p => ({ element: p.dataset.element, y: Number(p.dataset.layoutY), height: p.getBoundingClientRect().height }))
   }));
   fs.writeFileSync(path.join(output, 'pagination.json'), JSON.stringify(pageInfo, null, 2));
   assert(pageInfo.pageCount > 1, 'long action creates multiple visible editor pages');
-  assert.equal(pageInfo.numbers.length, pageInfo.pageCount, 'each editor page has a visible page number');
+  assert.equal(pageInfo.numbers.length, pageInfo.pageCount, 'every script page has a visible page number');
+  assert.equal(pageInfo.numbers[0], '1.', 'page numbering begins on the first script page');
+  assert.deepEqual(pageInfo.sceneNumbers, ['1', '2', '3', '4'], 'scene headings number in script order');
   assert(pageInfo.gaps > 0, 'single long action has rendered page-boundary spacers');
   const screenTokens = await page.locator('#chapters').innerText();
   for (const n of ['000', '090', '179']) assert.match(screenTokens, new RegExp(`LONG-ACTION-${n}`));

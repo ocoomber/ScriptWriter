@@ -10,12 +10,20 @@ const stage = path.join(root, '.build-stage');
 const output = path.join(root, 'dist');
 const stageOutput = path.join(stage, 'dist');
 const files = [
-  'package.json', 'package-lock.json', 'main.js', 'recovery-state.cjs', 'preload.js', 'index.html',
+  'package.json', 'package-lock.json', 'main.js', 'fountain-import.cjs', 'recovery-state.cjs', 'preload.js', 'index.html',
   'app.js', 'screenplay.js', 'screenplay-layout.js', 'styles.css',
   'screenplay.css', 'covers.js', 'art.js', 'fonts', 'build'
 ];
 
 if (path.dirname(stage) !== root) throw new Error('Build stage must be inside the project');
+// Discard only this generated staging folder so removed dependencies cannot
+// linger from a previous package. Never follow a redirected staging path.
+if (fs.existsSync(stage)) {
+  if (fs.lstatSync(stage).isSymbolicLink() || fs.realpathSync(stage) !== stage) {
+    throw new Error('Build stage must be a real directory inside the project');
+  }
+  fs.rmSync(stage, { recursive: true, force: true });
+}
 fs.mkdirSync(stage, { recursive: true });
 for (const name of files) {
   fs.cpSync(path.join(root, name), path.join(stage, name), { recursive: true, force: true });

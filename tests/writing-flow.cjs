@@ -59,6 +59,8 @@ async function caret(selector, offset) {
   await press('Escape');
   assert.match(await page.locator('.chapter-body').innerText(), /Just me\./);
   await press('Shift+Enter'); await type('The light flickers.');
+  assert.match(await page.locator('[data-element="dialogue"]').last().innerText(), /Just me\.$/,
+    'Shift+Enter should keep punctuation already written in Dialogue');
   assert.equal(await page.locator('[data-element="action"]').last().innerText(), 'The light flickers.');
   console.log('PASS: two-speaker ranking, cancel, dialogue to action');
 
@@ -66,12 +68,19 @@ async function caret(selector, offset) {
   await caret('[data-element="action"]', 4);
   await press('Enter');
   const actionTexts = await page.locator('[data-element="action"]').allTextContents();
-  assert(actionTexts.includes('The ') && actionTexts.includes('light flickers.'), JSON.stringify(actionTexts));
+  assert(actionTexts.includes('The.') && actionTexts.includes('light flickers.'), JSON.stringify(actionTexts));
   await press('Control+z');
   assert((await page.locator('[data-element="action"]').allTextContents()).includes('The light flickers.'), 'Undo restores split');
   await caret('[data-element="action"]');
-  await press('Enter'); await press('Enter'); await press('Enter');
+  await press('Enter'); await press('Enter');
+  assert.equal(await page.locator('#sp-picker').isVisible(), false, 'The scene picker should wait for the third Enter');
+  await press('Enter');
   await page.waitForSelector('#sp-picker:not([hidden])');
+  assert.equal(await page.locator('#sp-picker .selected').innerText(), 'INT.');
+  await press('ArrowDown');
+  assert.equal(await page.locator('#sp-picker .selected').innerText(), 'EXT.', 'ArrowDown should move the scene type selection');
+  await press('ArrowUp');
+  assert.equal(await page.locator('#sp-picker .selected').innerText(), 'INT.', 'ArrowUp should move it back');
   await type('e'); await press('Space'); await type('Street'); await press('Space'); await press('Space'); await press('Enter');
   assert.equal(await page.locator('.chapter-body').count(), 2);
   assert.equal(await page.locator('[data-element="scene-heading"]').last().innerText(), 'EXT. STREET - DAY');

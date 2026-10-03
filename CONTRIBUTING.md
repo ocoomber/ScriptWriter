@@ -1,32 +1,21 @@
-# Contributing to NEO
+# Working on ScriptWriter
 
-Thanks for wanting to make NEO better. A few notes before you dive in.
+ScriptWriter is a Windows-first screenplay editor based on NEO. It is an early development project maintained by a solo developer. Bug reports and focused fixes are welcome.
 
-## The philosophy
+Changes should help someone write a screenplay: reliable editing, recoverable text, correct page layout, accessible controls, and accurate import or export. Keep writing controls quiet until the writer deliberately reveals them.
 
-NEO exists because every writing app was eventually ruined by bloat. The bar for new features is not "would this be cool?" but "does this help a working author write, finish, and publish books?"
+## Windows setup
 
-Good territory: bug fixes, performance, accessibility, better import/export precision, and platform polish (especially Windows and Linux, which I haven't tested much).
+Install Node.js, then run `npm ci` once in the project folder. Double-click **Open ScriptWriter with latest changes.bat** to run the source, or **Create Windows installer and portable app.bat** to build the Windows x64 installer and portable executable in `dist`.
 
-## How the code works
+Read `AGENTS.md` before changing code. `main.js` handles persistence and filesystem access; `preload.js` exposes the renderer API; `app.js` manages the library and shared editor UI. Screenplay interactions are in `screenplay.js`, physical pagination and PDF HTML in `screenplay-layout.js`, and screenplay styling in `screenplay.css`.
 
-- `main.js` — the Electron main process: window, menus, file system, import/export, backups.
-- `preload.js` — the bridge. Every capability the UI has is listed here.
-- `app.js` — the entire UI: bookshelf, editor, outline, search, goals.
-- `styles.css` — all styling, with CSS variables at the top.
+The library lives in `Documents\ScriptWriter Library`. Each screenplay has its own ID and folder, with metadata in `book.json` and scene text in `chapters\*.html`. Titles are display names. Never include personal screenplays, library files, generated PDFs, or local test output in a contribution.
 
-Books are folders of plain files in `~/Documents/NEO Library`: `book.json` for metadata, `chapters/*.html` for text, JSON files for darlings/stickies.
+## Verification and reports
 
-## Ground rules
+Run `npm run test:headless` for browser and code checks without opening Electron. The browser checks currently require Google Chrome in its default Windows install location and Python with `pypdf` and `pdfplumber` for PDF text inspection (`python -m pip install pypdf pdfplumber`). `SCRIPTWRITER_PDF_PYTHON` can select a different Python executable. `npm test` opens Electron for the desktop regression suite; respect the local launch restriction in `AGENTS.md` and do not run it on a machine affected by the application-error popup without permission.
 
-1. **Nothing interrupts a writer mid-sentence.** No popups, no squiggles, no notifications while typing.
-2. **UI stays invisible until hovered.** 
-3. **Words are never lost.** Any feature that removes text must route it somewhere recoverable.
-4. **Plain files.** No databases, no proprietary formats. Future-proof, please!
+Describe the writer-visible problem and the checks you actually ran. A successful build does not establish that desktop dialogs, printing, or interactions work. Bug reports should include the Windows version, ScriptWriter version, reproduction steps, and the relevant error from `Documents\ScriptWriter Library\neo-errors.log` if available. Remove private screenplay text before sharing logs.
 
-## Practical bits
-
-- Run from source: `npm install && npm start` (needs Node.js).
-- Keep PRs focused — one feature or fix each.
-- Describe the writer-facing behavior in your PR, not just the code. Think like an author, not a programmer!
-- Bug reports: please include your OS, what you did, what happened, and the tail of `~/Documents/NEO Library/neo-errors.log` if it's a crash.
+Keep the MIT license and upstream NEO attribution intact.

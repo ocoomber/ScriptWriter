@@ -2,11 +2,15 @@
 
 ScriptWriter is an early Windows build for writing feature screenplays. It saves to your PC and does not need an account or an internet connection.
 
-The screenplay page is the writing view. Move the pointer to the bottom edge when you want the work controls; they hide again when you return to the page. The left and right edges reveal Scenes and Darlings. Selecting script text reveals only actions for that selection.
+The screenplay page is the writing view. Move the pointer to the top edge when you want the work controls; they hide again when you return to the page. The left and right edges reveal Scenes and Darlings. Selecting script text reveals only actions for that selection.
 
 ## Start a screenplay
 
 From the library, select the **+** card. A blank screenplay opens with the scene-heading prompt ready. Follow the prompt to choose **INT.** or **EXT.**, enter a location, then choose or type a time. The heading appears in the script before you continue writing.
+
+Each screenplay card has a **⋯** options button. Click it, or right-click the card, to rename the screenplay or move it to the Windows Recycle Bin. Moving it requires confirmation, and you can recover its folder from the Recycle Bin.
+
+Importing a screenplay whose title already exists adds a numbered suffix such as **THE HELPER (2)**. The comparison ignores capitalisation and extra spaces. Each screenplay still has its own separate folder; existing titles and files are preserved.
 
 The title page stays out of the writing view. Reveal the bottom controls and choose **Tools → Title page & paper size** to set the title, writer credit, contact details, and A4 or US Letter paper size. It appears in the exported PDF.
 
@@ -15,10 +19,11 @@ The title page stays out of the writing view. Reveal the bottom controls and cho
 - Press **Tab** anywhere in the script to open the character selector at the position of the next character cue. The likely next speaker is highlighted, so **Tab**, then **Enter**, starts their dialogue. Type a name, including spaces, to choose someone else.
 - In the scene-heading and character menus, use **Up** and **Down** to move through choices. **Enter** accepts the highlighted choice; **Space** remains part of a character name.
 - When entering a new location, use single spaces between words and double-space to finish it. A suggested location can be accepted with Space.
-- **Enter** continues in the current element. Press **Shift+Enter** in Dialogue to begin an Action line.
+- **Enter** continues in the current element and adds a full stop when the sentence has no ending punctuation. Press **Shift+Enter** in Dialogue to begin an Action line; it finishes the sentence too.
 - When the same character speaks again before anyone else, their new cue gets **(CONT'D)** automatically.
 - The first letter of an Action or Dialogue sentence, a standalone **I**, and known character names capitalise as you type.
-- Pressing **Tab** at the end of an unfinished Action or Dialogue sentence adds a full stop. Likely questions get a question mark instead; turn this off under **Tools → Writing settings**. Punctuation you type yourself is kept.
+- Pressing **Tab** at the end of an unfinished Action or Dialogue sentence adds a full stop. When you type a space after a question word such as “What”, a question mark appears at the end of the line as you continue writing. Turn this off under **Tools → Writing settings**. Punctuation you type yourself replaces the suggestion.
+- Common missing apostrophes are corrected as you finish a word, such as **theyre → they're** and **dont → don't**. Toggle this under **Tools → Writing settings**.
 - Type **(** at the start of a Dialogue line to make it a Parenthetical.
 - **Shift+Space** adds a visible placeholder while you keep writing. Review unresolved placeholders when exporting a PDF; their markers do not print.
 - **Ctrl+Z** and **Ctrl+Y** undo and redo. Windows editing shortcuts such as **Ctrl+C**, **Ctrl+V**, and **Ctrl+Z** keep their normal meanings.
@@ -37,7 +42,7 @@ Reveal the bottom controls and choose **Outline** to open a separate planning wo
 
 Your library is in the Windows Documents folder under `ScriptWriter Library`; choose **Tools → Open library folder** to open it in Explorer. Each screenplay folder contains a readable HTML manuscript and JSON support files. ScriptWriter saves continuously and keeps up to 14 daily ZIP backups in that screenplay's `Backups` folder. It opens your saved screenplay directly; if a genuinely different unsaved draft exists, it preserves that draft separately. Choose **Tools → Recover unsaved writing as copy** to open it later, or **Tools → Restore backup as copy** for a daily backup. Both actions keep your current screenplay unchanged.
 
-Reveal the bottom controls and choose **Save PDF** to create a PDF. A4 is the default; US Letter can be selected in **Tools → Title page & paper size**. The editor and PDF export share an early pagination layout. Printed page breaks and margins still need broader comparison, so check the result before sending it as a submission copy.
+Reveal the top controls and choose **Save PDF** to create a PDF. Scene headings are numbered on both sides in the editor and PDF, and renumber when scenes move. The separate title page is unnumbered; script pages begin with page 1. A4 is the default; US Letter can be selected in **Tools → Title page & paper size**. The editor and PDF export share an early pagination layout. Printed page breaks and margins still need broader comparison, so check the result before sending it as a submission copy.
 
 ## Development build limits
 

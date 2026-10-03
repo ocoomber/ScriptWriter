@@ -84,6 +84,27 @@
     } else if (event.key.startsWith('Arrow') || ['Home','End','PageUp','PageDown'].includes(event.key)) lastTypingAt = 0;
   }, true);
   let autoCaseBusy = false;
+  const liveQuestionLines = new WeakSet();
+  const contractions = new Map(Object.entries({
+    im:"I'm", ive:"I've", youre:"you're", youve:"you've", youll:"you'll", youd:"you'd",
+    hes:"he's", hed:"he'd", shes:"she's", itll:"it'll", itd:"it'd",
+    weve:"we've", theyre:"they're", theyve:"they've", theyll:"they'll", theyd:"they'd",
+    thats:"that's", thatll:"that'll", whatll:"what'll", whats:"what's", whos:"who's",
+    wheres:"where's", whens:"when's", whys:"why's", hows:"how's", heres:"here's",
+    theres:"there's", therell:"there'll", thered:"there'd", yall:"y'all", aint:"ain't",
+    dont:"don't", doesnt:"doesn't", didnt:"didn't", cant:"can't", wont:"won't",
+    couldnt:"couldn't", wouldnt:"wouldn't", shouldnt:"shouldn't", isnt:"isn't",
+    arent:"aren't", wasnt:"wasn't", werent:"weren't", havent:"haven't",
+    hasnt:"hasn't", hadnt:"hadn't", mustnt:"mustn't", neednt:"needn't", shant:"shan't",
+    wouldve:"would've", couldve:"could've", shouldve:"should've", mightve:"might've",
+    mustve:"must've", wouldntve:"wouldn't've", couldntve:"couldn't've", shouldntve:"shouldn't've"
+  }));
+  const contractionFor = word => {
+    const corrected = contractions.get(word.toLocaleLowerCase('en-GB'));
+    if (!corrected) return null;
+    if (word === word.toLocaleUpperCase('en-GB') && word.length > 1) return corrected.toLocaleUpperCase('en-GB');
+    return word[0] === word[0].toLocaleUpperCase('en-GB') ? corrected[0].toLocaleUpperCase('en-GB') + corrected.slice(1) : corrected;
+  };
   const replaceBeforeCaret = (paragraph, caret, length, replacement) => {
     const before = document.createRange();
     before.selectNodeContents(paragraph);
@@ -120,19 +141,45 @@
         prefix.selectNodeContents(paragraph);
         prefix.setEnd(range.startContainer, range.startOffset);
         const before = prefix.toString();
+        if (liveQuestionLines.has(paragraph) && /[.!?]/.test(event.data)) {
+          const after = document.createRange();
+          after.selectNodeContents(paragraph);
+          after.setStart(range.startContainer, range.startOffset);
+          if (after.toString() === '?') {
+            event.preventDefault();
+            recordHistory(true);
+            selection.removeAllRanges();
+            selection.addRange(after);
+            liveQuestionLines.delete(paragraph);
+            autoCaseBusy = true;
+            try { document.execCommand('insertText', false, event.data); }
+            finally { autoCaseBusy = false; }
+            return;
+          }
+        }
         if (/^[a-z]$/.test(event.data) && (/^[\s“‘"'([]*$/.test(before) || /[.!?][”"')\]]*\s+[\s“‘"'([]*$/.test(before))) {
           event.preventDefault();
           document.execCommand('insertText', false, event.data.toUpperCase());
           return;
         }
         if (/[\s.,!?;:'"”’…)\]]/.test(event.data)) {
+          if (library?.settings?.autoApostrophes !== false && /[\s.,!?;:…)\]”]/.test(event.data)) {
+            const word = before.match(/([\p{L}]+)$/u)?.[1];
+            const corrected = word && contractionFor(word);
+            if (corrected) {
+              event.preventDefault();
+              if (replaceBeforeCaret(paragraph, range, word.length, corrected + event.data)) return;
+              document.execCommand('insertText', false, event.data);
+              return;
+            }
+          }
           const names = usedCharacters().sort((a, b) => b.length - a.length);
           const name = names.find(value => before.slice(-value.length).toLocaleUpperCase('en-GB') === value &&
             (before.length === value.length || !/[\p{L}\p{N}]/u.test(before[before.length - value.length - 1])));
           const standaloneI = /(?:^|[^\p{L}\p{N}])i$/u.test(before);
           if (name || standaloneI) {
             const length = name ? name.length : 1;
-            const replacement = (name || 'I') + event.data;
+            const replacement = (name ? proseCharacterName(name) : 'I') + event.data;
             event.preventDefault();
             if (replaceBeforeCaret(paragraph, range, length, replacement)) return;
             document.execCommand('insertText', false, event.data);
@@ -186,7 +233,7 @@
     return n?.closest?.('[data-element]') && body.contains(n.closest('[data-element]')) ? n.closest('[data-element]') : null;
   };
   const putCaret = (node, end = false) => {
-    node.closest('.chapter-body')?.focus(); const r = document.createRange(); r.selectNodeContents(node); r.collapse(!end);
+    node.closest('.chapter-body')?.focus({ preventScroll: true }); const r = document.createRange(); r.selectNodeContents(node); r.collapse(!end);
     const s = getSelection(); s.removeAllRanges(); s.addRange(r);
   };
   // Replace only the selected span, preserving the prefix and suffix as typed
@@ -230,6 +277,24 @@
     if (!p) { p = document.createElement('div'); p.id = 'sp-picker'; p.className = 'sp-picker'; document.body.append(p); }
     return p;
   };
+  let centerCaretFrame = 0;
+  const centerScreenplayCaret = (force = false) => {
+    if (!document.body.classList.contains('typewriter') || !book || $('#editor-view').hidden || $('#paper').hidden || (!force && picker)) return;
+    const body = document.activeElement?.closest?.('.chapter-body');
+    const selection = getSelection(), range = selection.rangeCount && selection.getRangeAt(0);
+    if (!body || !range?.collapsed || !body.contains(range.startContainer)) return;
+    const scroller = $('#paper-scroll');
+    let caret = range.getBoundingClientRect();
+    if (!caret || (caret.top === 0 && caret.height === 0)) caret = (range.startContainer.nodeType === Node.TEXT_NODE ? range.startContainer.parentElement : range.startContainer).getBoundingClientRect();
+    if (!caret) return;
+    const viewport = scroller.getBoundingClientRect();
+    const difference = caret.top - (viewport.top + viewport.height / 2);
+    if (Math.abs(difference) > 2) scroller.scrollTop += difference;
+  };
+  window.scheduleScreenplayCaretCenter = () => {
+    cancelAnimationFrame(centerCaretFrame);
+    centerCaretFrame = requestAnimationFrame(() => centerScreenplayCaret());
+  };
   const safe = (value) => (typeof escHtml === 'function' ? escHtml(String(value)) : String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])));
   const closePicker = (restore = false) => {
     if (!picker) return;
@@ -264,7 +329,7 @@
     if (!choices.length && picker.kind !== 'heading-location' && picker.kind !== 'heading-time' && picker.kind !== 'character') choices.push('');
     picker.visible = choices;
     picker.index = Math.max(0, Math.min(picker.index || 0, choices.length - 1));
-    p.innerHTML = `<div class="sp-picker-label">${safe(picker.label)}</div>${picker.kind === 'character' ? '<div class="sp-picker-hint">Suggested speaker first · recent scene speakers next</div>' : ''}<div class="sp-picker-query">${safe(picker.query || ' ')}</div>` + choices.map((x, i) => `<div class="sp-picker-choice ${i === picker.index ? 'selected' : ''}">${safe(picker.kind === 'character' && typed && x === typed.toUpperCase() && !picker.choices.includes(x) ? `Create ${x}` : x || 'Type a new value')}</div>`).join('');
+    p.innerHTML = `<div class="sp-picker-label">${safe(picker.label)}</div><div class="sp-picker-query">${safe(picker.query || ' ')}</div>` + choices.map((x, i) => `<div class="sp-picker-choice ${i === picker.index ? 'selected' : ''}">${safe(picker.kind === 'character' && typed && x === typed.toUpperCase() && !picker.choices.includes(x) ? `Create ${x}` : x || 'New')}</div>`).join('');
     const rect = picker.range?.getBoundingClientRect();
     const fallback = (picker.block || picker.body.querySelector('[data-element="scene-heading"]') || picker.body).getBoundingClientRect();
     let target = characterPickerTarget();
@@ -297,6 +362,7 @@
   const usedLocations = () => book.chapterOrder.map(sceneName).map(headingParts).map(x => x[1]).filter(Boolean).filter((x,i,a)=>a.indexOf(x)===i);
   const characterName = cue => cue.textContent.trim().replace(/(?:\s*\([^)]*\))+$/, '').trim();
   const usedCharacters = () => [...document.querySelectorAll('#chapters [data-element="character"]')].map(characterName).filter(Boolean).filter((x,i,a)=>a.indexOf(x)===i);
+  const proseCharacterName = name => name.toLocaleLowerCase('en-GB').replace(/(^|[\s'-])(\p{L})/gu, (_, separator, letter) => separator + letter.toLocaleUpperCase('en-GB'));
   const rankedCharacters = (id, range) => {
     const scene=bodyFor(id);
     let cueNodes=scene ? [...scene.querySelectorAll('[data-element="character"]')] : [];
@@ -311,8 +377,10 @@
     return [...new Set([suggested,...recent,...remaining].filter(Boolean))];
   };
   const beginHeading = (body, id) => {
-    const b = caretBlock(body) || body.querySelector('[data-element="scene-heading"]');
+    const b = body.querySelector('[data-element="scene-heading"]');
     if (!b) return;
+    if (document.activeElement !== body) putCaret(b);
+    centerScreenplayCaret(true);
     const selection=getSelection();
     let r=selection?.rangeCount ? selection.getRangeAt(0).cloneRange() : null;
     if (!r || !body.contains(r.startContainer)) { r=document.createRange(); r.selectNodeContents(b); r.collapse(false); }
@@ -335,33 +403,62 @@
     }
     return false;
   };
-  // Tab is where a writer commits a line and moves to the next speaker.  When
-  // the caret is at the end of an action or dialogue element, finish the
-  // sentence first so the document never acquires a cue directly after prose.
-  const questionLead = text => {
-    // Only inspect the sentence being finished, not an earlier question in the
-    // same element.  "What a/an …" is a common exclamation, so leave it to the
-    // writer rather than confidently turning it into a question.
-    const sentence = text.replace(/^.*[.!?…][”"')\]]*\s*/s, '').trimStart()
-      .replace(/^[“‘"'([]+\s*/, '');
-    const match = sentence.match(/^(what|who|whom|whose|where|when|why|how|which)\b/i);
-    if (!match) return false;
-    return !(match[1].toLowerCase() === 'what' && /^what\s+(?:a|an)\b/i.test(sentence));
+  // Finish a sentence before Enter or Tab leaves its current prose line.
+  const addLiveQuestionMark = (event, body) => {
+    if (event.inputType !== 'insertText' || event.data !== ' ' || library?.settings?.questionMarkAutofill === false) return;
+    const selection = getSelection(), range = selection.rangeCount && selection.getRangeAt(0);
+    if (!range?.collapsed) return;
+    const element = (range.startContainer.nodeType === Node.TEXT_NODE ? range.startContainer.parentElement : range.startContainer)?.closest?.('[data-element]');
+    if (!element || !body.contains(element) || !['action', 'dialogue'].includes(element.dataset.element)) return;
+    const before = document.createRange(); before.selectNodeContents(element); before.setEnd(range.startContainer, range.startOffset);
+    const after = document.createRange(); after.selectNodeContents(element); after.setStart(range.startContainer, range.startOffset);
+    const sentence = before.toString().replace(/^.*[.!?…][”"')\]]*\s*/s, '');
+    if (after.toString() || !/^(?:[“‘"'([]\s*)?(?:what|who|whom|whose|where|when|why|how|which)\s$/i.test(sentence)) return;
+    const mark = document.createTextNode('?');
+    range.insertNode(mark);
+    range.setStartBefore(mark);
+    range.collapse(true);
+    selection.removeAllRanges(); selection.addRange(range);
+    liveQuestionLines.add(element);
   };
-  const finishSentenceForCharacterCue = (body, range) => {
+  const liveQuestionSuffix = body => {
+    const selection = getSelection(), range = selection.rangeCount && selection.getRangeAt(0);
+    if (!range?.collapsed) return null;
+    const element = (range.startContainer.nodeType === Node.TEXT_NODE ? range.startContainer.parentElement : range.startContainer)?.closest?.('[data-element]');
+    if (!element || !body.contains(element) || !liveQuestionLines.has(element)) return null;
+    const suffix = document.createRange(); suffix.selectNodeContents(element); suffix.setStart(range.startContainer, range.startOffset);
+    return suffix.toString() === '?' ? { element, suffix, range } : null;
+  };
+  const finishSentenceAtCaret = (body, range, splittingLine = false) => {
     if (!range?.collapsed) return range;
     const source = range.startContainer.nodeType === Node.TEXT_NODE ? range.startContainer.parentElement : range.startContainer;
     const element = source?.closest?.('[data-element]');
     if (!element || !body.contains(element) || !['action', 'dialogue'].includes(element.dataset.element)) return range;
+    if (liveQuestionLines.has(element)) {
+      const suffix = document.createRange(); suffix.selectNodeContents(element); suffix.setStart(range.startContainer, range.startOffset);
+      if (suffix.toString() === '?') {
+        range.selectNodeContents(element); range.collapse(false);
+        const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
+        liveQuestionLines.delete(element);
+      }
+    }
+    const remainingText = document.createRange(); remainingText.selectNodeContents(element); remainingText.setStart(range.startContainer, range.startOffset);
+    if (!splittingLine && remainingText.toString().trim()) return range;
+    if (library?.settings?.autoApostrophes !== false) {
+      const prefix = document.createRange(); prefix.selectNodeContents(element); prefix.setEnd(range.startContainer, range.startOffset);
+      const word = prefix.toString().match(/([\p{L}]+)$/u)?.[1];
+      const corrected = word && contractionFor(word);
+      if (corrected && replaceBeforeCaret(element, range, word.length, corrected)) {
+        const selection = getSelection();
+        if (selection.rangeCount) range = selection.getRangeAt(0).cloneRange();
+      }
+    }
     const before = document.createRange(); before.selectNodeContents(element); before.setEnd(range.startContainer, range.startOffset);
-    const after = document.createRange(); after.selectNodeContents(element); after.setStart(range.startContainer, range.startOffset);
-    // Tab in the middle of prose must leave that prose exactly as it is.
-    if (after.toString().trim()) return range;
     const text = before.toString();
     const trimmed = text.trimEnd();
-    if (!trimmed || /[.!?…][”"')\]]*$/.test(trimmed)) return range;
+    if (!trimmed || /[.!?…][”"')\]]*$/.test(trimmed) || /[,;:—–-]$/.test(trimmed)) return range;
     recordHistory();
-    // A space before Tab belongs after the sentence-ending mark, never before it.
+    // Trailing space belongs after the sentence-ending mark, never before it.
     const trailing = text.length - trimmed.length;
     if (trailing) {
       const textPoint = offset => {
@@ -378,8 +475,7 @@
       const selection = getSelection(); selection.removeAllRanges(); selection.addRange(whitespace);
       document.execCommand('delete', false);
     }
-    const question = library?.settings?.questionMarkAutofill !== false && questionLead(trimmed);
-    document.execCommand('insertText', false, question ? '?' : '.');
+    document.execCommand('insertText', false, '.');
     const selection = getSelection();
     return selection.rangeCount ? selection.getRangeAt(0).cloneRange() : range;
   };
@@ -401,7 +497,7 @@
   const openCharacter = (body, id) => {
     const s=getSelection(); let r=s.rangeCount?s.getRangeAt(0).cloneRange():null;
     if (r && !(r.endContainer.nodeType === 3 ? r.endContainer.parentElement : r.endContainer).closest('.chapter-body')?.isSameNode(body)) return toast('Choose text within one scene for a character cue');
-    r = finishSentenceForCharacterCue(body, r);
+    r = finishSentenceAtCaret(body, r);
     const b=caretBlock(body) || body.querySelector('[data-element]:last-child'); if (!b) return;
     picker={kind:'character',label:'CHARACTER',body,id,block:b,choices:rankedCharacters(id,r),query:'',index:0,navigated:false,range:r}; renderPicker();
   };
@@ -428,9 +524,15 @@
     }
     return false;
   };
+  document.addEventListener('keydown', event => {
+    if (!picker || event.target.closest?.('.chapter-body')) return;
+    if (pickerKey(event)) event.stopImmediatePropagation();
+  }, true);
   const onEnter = (e, body, id) => {
     if (e.key !== 'Enter' || e.ctrlKey || e.altKey || e.metaKey || pickerKey(e)) return;
     const b=caretBlock(body); if (!b) return;
+    const selection = getSelection();
+    if (selection.rangeCount && selection.isCollapsed) finishSentenceAtCaret(body, selection.getRangeAt(0).cloneRange(), true);
     const splitAtCaret = (type) => {
       const s=getSelection(); if(!s.rangeCount) return null; const r=s.getRangeAt(0).cloneRange();
       const elementAt=node => (node.nodeType===3 ? node.parentElement : node).closest?.('[data-element]');
@@ -449,7 +551,12 @@
       const n=block(type); n.replaceChildren(after); if(!n.childNodes.length)n.innerHTML='<br>'; first.after(n);
       save(body,id); putCaret(n); return n;
     };
-    if (keyString(e)===bindings().action && b.dataset.element === 'dialogue') { e.preventDefault(); snapshotStructure('dialogue to action'); splitAtCaret('action'); return; }
+    if (keyString(e)===bindings().action && b.dataset.element === 'dialogue') {
+      e.preventDefault();
+      snapshotStructure('dialogue to action');
+      splitAtCaret('action');
+      return;
+    }
     if (b.dataset.element === 'parenthetical') { e.preventDefault(); const n=block('dialogue'); b.after(n); save(body,id); putCaret(n); return; }
     if(!getSelection().isCollapsed){
       e.preventDefault();
@@ -462,7 +569,7 @@
     const count=enterSequence.block===b&&enterSequence.scene===id&&!b.textContent.trim()?enterSequence.count+1:1;
     if(count>=3){
       if(!b.textContent.trim())b.remove();save(body,id);enterSequence={count:0,block:null,scene:null};
-      const next=createChapterAt(book.chapterOrder.indexOf(id)+1);requestAnimationFrame(()=>beginHeading(bodyFor(next),next));return;
+      const next=createChapterAt(book.chapterOrder.indexOf(id)+1);putCaret(bodyFor(next).querySelector('[data-element="scene-heading"]'));requestAnimationFrame(()=>beginHeading(bodyFor(next),next));return;
     }
     if(count===2){
       b.dataset.element=b.dataset.element==='dialogue'?'character':b.dataset.element;delete b.dataset.continuation;
@@ -508,10 +615,28 @@
       document.execCommand('insertText', false, event.clipboardData.getData('text/plain'));
       normalise(body); save(body,id);
     });
-    body.addEventListener('input',()=>{ enterSequence.count=0; nativeTypingSinceStructure=true; const b=caretBlock(body); if (b?.dataset.element==='dialogue' && b.textContent.startsWith('(')) b.dataset.element='parenthetical'; save(body,id); });
+    body.addEventListener('input',event=>{ enterSequence.count=0; nativeTypingSinceStructure=true; addLiveQuestionMark(event,body); const b=caretBlock(body); if (b?.dataset.element==='dialogue' && b.textContent.startsWith('(')) b.dataset.element='parenthetical'; save(body,id); window.scheduleScreenplayCaretCenter(); });
     body.addEventListener('keydown',(e)=>{
       if(e.key.startsWith('Arrow')||['Home','End','PageUp','PageDown'].includes(e.key))enterSequence.count=0;
       if (pickerKey(e)) { e.stopPropagation(); return; }
+      if (['Backspace', 'Delete', 'Enter'].includes(e.key) && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        const pendingQuestion = liveQuestionSuffix(body);
+        if (pendingQuestion) {
+          liveQuestionLines.delete(pendingQuestion.element);
+          if (e.key === 'Enter') {
+            pendingQuestion.range.selectNodeContents(pendingQuestion.element);
+            pendingQuestion.range.collapse(false);
+            const selection = getSelection(); selection.removeAllRanges(); selection.addRange(pendingQuestion.range);
+          } else pendingQuestion.suffix.deleteContents();
+        }
+      }
+      if (e.key === 'Backspace' && !e.ctrlKey && !e.altKey && !e.metaKey && !body.textContent.trim() && book.chapterOrder.length > 1) {
+        e.preventDefault(); e.stopPropagation(); recordHistory();
+        const index = book.chapterOrder.indexOf(id);
+        const next = book.chapterOrder[index > 0 ? index - 1 : 1];
+        deleteChapterQuiet(id).then(() => focusChapter(next));
+        return;
+      }
       if (protectElementBoundary(e,body,id)) { e.stopPropagation(); return; }
       const format={KeyB:'bold',KeyI:'italic',KeyU:'underline'}[e.code];
       if(format && (e.ctrlKey||e.metaKey) && !e.shiftKey && !e.altKey){
@@ -525,7 +650,7 @@
         if(command==='darling')darlingFromKeyboard();
         if(command==='outline')switchTab('outline');
         if(command==='export')doExport('pdf');
-        if(command==='scene'){recordHistory();const next=createChapterAt(book.chapterOrder.indexOf(id)+1);beginHeading(bodyFor(next),next);}
+        if(command==='scene'){recordHistory();const next=createChapterAt(book.chapterOrder.indexOf(id)+1);putCaret(bodyFor(next).querySelector('[data-element="scene-heading"]'));requestAnimationFrame(()=>beginHeading(bodyFor(next),next));}
         if(command==='transition'){recordHistory();const p=caretBlock(body);if(p){p.dataset.element='transition';save(body,id);}}
         if(command==='action'){if(e.key==='Enter')onEnter(e,body,id);else{recordHistory();const p=caretBlock(body);if(p){p.dataset.element='action';save(body,id);}}}
         return;
@@ -541,7 +666,40 @@
     $$('.chapter').forEach(scene => scene.classList.add('screenplay-page'));
     window.scheduleScreenplayLayout?.();
   };
-  renderNav = function () { originalRenderNav(); if (!book) return; $$('#nav-list .nav-item').forEach(item=>{ const n=item.querySelector('.n-label'); if(n && book.chapterOrder.includes(item.dataset.id))n.textContent=sceneName(item.dataset.id); const note=item.querySelector('.nav-note'); if(note) note.remove(); }); };
+  let sceneJumpTimer;
+  const jumpToScene = id => {
+    switchTab('manuscript');
+    document.activeElement?.closest?.('.chapter-body')?.blur();
+    currentChapterId = id;
+    highlightNav();
+    window.scheduleScreenplayLayout?.();
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const heading = bodyFor(id)?.querySelector('[data-element="scene-heading"]');
+      if (!heading) return;
+      const scroller = $('#paper-scroll');
+      scroller.scrollTop += heading.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 24;
+      document.querySelectorAll('.scene-jump-highlight').forEach(node => node.classList.remove('scene-jump-highlight'));
+      heading.classList.add('scene-jump-highlight');
+      clearTimeout(sceneJumpTimer);
+      sceneJumpTimer = setTimeout(() => heading.classList.remove('scene-jump-highlight'), 1600);
+    }));
+  };
+  renderNav = function () {
+    originalRenderNav(); if (!book) return;
+    $$('#nav-list .nav-item').forEach((item, index) => {
+      const row = item.querySelector('.n-row');
+      const label = item.querySelector('.n-label');
+      if (row && label && book.chapterOrder.includes(item.dataset.id)) {
+        row.title = 'Click to jump · drag to reorder scenes';
+        label.textContent = sceneName(item.dataset.id);
+        const number = el('span', String(index + 1).padStart(2, '0') + '.');
+        number.className = 'sp-scene-number';
+        row.insertBefore(number, label);
+      }
+      item.querySelector('.nav-note')?.remove();
+      item.onclick = () => jumpToScene(item.dataset.id);
+    });
+  };
   const cancelDarlingPlacement = () => {
     pendingDarlingId = null;
     darlingPlacementBanner?.remove();
@@ -604,7 +762,7 @@
   },true);
   renderDarlings = function () {
     const list=$('#sticky-list'); if(!list || !book) return; list.innerHTML=''; $('#side-head span').textContent='Darlings';
-    if(!darlings.length) { const empty=el('p','Select script text and drag it to this panel to save it.');empty.className='darlings-empty';list.append(empty);return; }
+    if(!darlings.length) { const empty=el('p','No saved passages.');empty.className='darlings-empty';list.append(empty);return; }
     darlings.forEach(d=>{
       const card=document.createElement('div'); card.className='darling';
       const preview=document.createElement('div'); preview.textContent=(d.text||'').slice(0,180);
@@ -680,8 +838,30 @@
   bookTile=function(meta){
     const tile=el('div');tile.className='book';tile.dataset.bookId=meta.id;tile.tabIndex=0;
     const text=el('div');text.className='b-text';const title=el('div',meta.title||'Untitled');title.className='b-title';text.append(title);tile.append(text);
-    tile.onclick=()=>openBook(meta.id);tile.onkeydown=e=>{if(e.key==='Enter')openBook(meta.id);};
-    tile.oncontextmenu=async event=>{event.preventDefault();const title=await askInput('Rename screenplay','Title',meta.title||'');if(!title)return;meta.title=title;if(meta.screenplay)meta.screenplay.title=title;await window.neo.writeBookMeta(meta.id,meta);renderShelves();};
+    const showMenu=async event=>{
+      event.preventDefault();event.stopPropagation();
+      try {
+        const choice=await optionModal(meta.title||'Untitled',null,[
+          {label:'Rename screenplay',value:'rename'},
+          {label:'Move to Recycle Bin',desc:'You can recover the screenplay from the Windows Recycle Bin.',danger:true,value:'trash'}
+        ]);
+        if(choice==='rename'){
+          const name=await askInput('Rename screenplay','Title',meta.title||'');
+          if(!name)return;
+          meta.title=name;if(meta.screenplay)meta.screenplay.title=name;
+          await window.neo.writeBookMeta(meta.id,meta);await renderShelves();
+        } else if(choice==='trash'){
+          if(!await window.neo.deleteBook(meta.id,meta.title))return;
+          for(const shelf of library.shelves)shelf.bookIds=shelf.bookIds.filter(id=>id!==meta.id);
+          await window.neo.writeLibrary(library);await renderShelves();
+        }
+      } catch(error){toast('Could not complete screenplay action: '+error.message,10000);}
+    };
+    const menu=el('button','⋯');menu.className='screenplay-menu';menu.type='button';
+    menu.title='Screenplay options';menu.setAttribute('aria-label','Options for '+(meta.title||'Untitled'));
+    menu.onclick=showMenu;tile.append(menu);
+    tile.onclick=()=>openBook(meta.id);tile.onkeydown=e=>{if(e.target===tile&&e.key==='Enter')openBook(meta.id);};
+    tile.oncontextmenu=showMenu;
     return tile;
   };
   trackDailyWords=()=>{}; requestPaint=async()=>null;
@@ -739,12 +919,16 @@
   window.openWritingSettings=()=>{
     const backdrop=el('div');backdrop.className='modal-backdrop';
     const modal=el('div');modal.className='modal';backdrop.append(modal);
-    modal.append(el('h2','Writing settings'),el('p','Choose how ScriptWriter finishes a line when you press Tab.'));
+    modal.append(el('h2','Writing settings'));
     const label=el('label');label.className='writing-setting';
     const checkbox=el('input');checkbox.type='checkbox';checkbox.checked=library?.settings?.questionMarkAutofill!==false;
-    label.append(checkbox,document.createTextNode(' Add ? to likely questions'));
-    modal.append(label,el('p','For example, “What happened” becomes “What happened?” when you press Tab. Your own punctuation stays as written.'));
+    label.append(checkbox,document.createTextNode(' Add ? after question words'));
+    const apostropheLabel=el('label');apostropheLabel.className='writing-setting';
+    const apostropheCheckbox=el('input');apostropheCheckbox.type='checkbox';apostropheCheckbox.checked=library?.settings?.autoApostrophes!==false;
+    apostropheLabel.append(apostropheCheckbox,document.createTextNode(' Fix missing apostrophes'));
+    modal.append(label,apostropheLabel);
     checkbox.onchange=async()=>{try{library.settings={...(library.settings||{}),questionMarkAutofill:checkbox.checked};await window.neo.writeLibrary(library);}catch(error){toast('Could not save writing setting: '+error.message,10000);}};
+    apostropheCheckbox.onchange=async()=>{try{library.settings={...(library.settings||{}),autoApostrophes:apostropheCheckbox.checked};await window.neo.writeLibrary(library);}catch(error){toast('Could not save writing setting: '+error.message,10000);}};
     const close=el('button','Close');close.onclick=()=>backdrop.remove();modal.append(close);
     document.body.append(backdrop);checkbox.focus();
   };
@@ -795,7 +979,7 @@
   };
   showAbout=async()=>{
     const v=await window.neo.appVersion(),backdrop=el('div');backdrop.className='modal-backdrop';const modal=el('div');modal.className='modal';
-    modal.append(el('h2','ScriptWriter'),el('p','Version '+v),el('p','A focused screenplay editor based on NEO.'));
+    modal.append(el('h2','ScriptWriter'),el('p','Version '+v));
     const done=el('button','Close');done.onclick=()=>backdrop.remove();modal.append(done);backdrop.append(modal);document.body.append(backdrop);done.focus();
   };
   if (window.neo.onBeforeQuit) window.neo.onBeforeQuit(async () => {
@@ -937,7 +1121,7 @@
       converted=converted.replace(/\bi\b/g,'I');
       for(const name of usedCharacters().sort((a,b)=>b.length-a.length)){
         const escaped=name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
-        converted=converted.replace(new RegExp(`\\b${escaped}\\b`,'gi'),name);
+        converted=converted.replace(new RegExp(`\\b${escaped}\\b`,'gi'),proseCharacterName(name));
       }
     }
     if(converted===original)return;
@@ -1017,7 +1201,7 @@
     document.body.classList.add('screenplay-mode');document.body.dataset.pageSize=book.screenplay.pageSize==='letter'?'letter':'a4';
     $('#tp-title').textContent=book.screenplay.title;$('#tp-subtitle').textContent='';$('#tp-author').textContent=book.screenplay.writer;
     $$('.chapter-body').forEach(b=>{normalise(b);save(b,b.closest('.chapter').dataset.id);});renderNav();renderDarlings();
-    if(!book.chapterOrder.length){const scene=createChapterAt(0);requestAnimationFrame(()=>beginHeading(bodyFor(scene),scene));}
+    if(!book.chapterOrder.length){const scene=createChapterAt(0);putCaret(bodyFor(scene).querySelector('[data-element="scene-heading"]'));requestAnimationFrame(()=>beginHeading(bodyFor(scene),scene));}
     renderEditCharacters();toggleEditPanel(false);window.scheduleScreenplayLayout?.();
   };
 })();

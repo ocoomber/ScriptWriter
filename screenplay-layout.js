@@ -18,7 +18,7 @@
   function cleanBody(body) {
     const clone = body.cloneNode(true);
     clone.querySelectorAll('.sp-page-gap').forEach(node => node.remove());
-    clone.querySelectorAll('[data-element]').forEach(node => { node.removeAttribute('style'); node.removeAttribute('data-layout-y'); });
+    clone.querySelectorAll('[data-element]').forEach(node => { node.removeAttribute('style'); node.removeAttribute('data-layout-y'); node.removeAttribute('data-scene-number'); });
     return clone.innerHTML;
   }
   window.cleanScreenplayBody = cleanBody;
@@ -34,6 +34,11 @@
     wrap.classList.add('sp-paginated');
     wrap.style.width = width+'px';wrap.style.setProperty('--sp-page-height',height+'px');wrap.style.setProperty('--sp-stride',stride+'px');
     const elements = [...wrap.querySelectorAll('.chapter-body > [data-element]')];
+    let sceneNumber = 0;
+    for (const element of elements) {
+      if (element.dataset.element === 'scene-heading') element.dataset.sceneNumber = String(++sceneNumber);
+      else element.removeAttribute('data-scene-number');
+    }
     let page=0, used=0, previousAfter=0;
     elements.forEach((p,index) => {
       p.querySelectorAll('.sp-page-gap').forEach(node=>node.remove());
@@ -103,6 +108,7 @@
     wrap.style.height=(count*stride-GAP)+'px';wrap.dataset.pageCount=count;
     wrap.querySelectorAll(':scope > .sp-page-number').forEach(node=>node.remove());
     for(let i=0;i<count;i++){const n=document.createElement('span');n.className='sp-page-number';n.textContent=(i+1)+'.';n.style.top=(i*stride+48)+'px';wrap.append(n);}
+    window.scheduleScreenplayCaretCenter?.();
   }
   window.paginateScreenplay=layout;
   window.scheduleScreenplayLayout=()=>{cancelAnimationFrame(pending);pending=requestAnimationFrame(layout);};
@@ -130,6 +136,8 @@
       .page{position:relative;width:${width}px;height:${height}px;overflow:hidden;break-after:page}.page:last-child{break-after:auto}
       .number{position:absolute;top:48px;right:96px}.title{text-align:center;padding:300px 96px 96px}.title h1{font:12pt/24px 'Courier New',monospace;text-transform:uppercase;white-space:pre-wrap}.contact{position:absolute;bottom:96px;left:144px;text-align:left;white-space:pre-wrap}
       p{min-height:16px;margin:0}[data-element="scene-heading"],[data-element="character"],[data-element="transition"]{text-transform:uppercase}[data-element="transition"]{text-align:right}
+      [data-element="scene-heading"][data-scene-number]::before,[data-element="scene-heading"][data-scene-number]::after{content:attr(data-scene-number);position:absolute;top:0;width:3em;font:inherit;text-align:center}
+      [data-element="scene-heading"][data-scene-number]::before{left:-3em}[data-element="scene-heading"][data-scene-number]::after{right:-3em}
     </style></head><body><section class="page title"><h1>${escape(book.title||'UNTITLED')}</h1><p>Written by</p><p>${escape(m.writer||book.author)}</p><div class="contact">${escape(m.contact)}</div></section>${pages.join('')}</body></html>`;
     } finally { paper.hidden=wasHidden; }
   };
